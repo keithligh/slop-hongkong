@@ -1,0 +1,123 @@
+# PlanD photo-realistic mesh — Central corridor
+
+The Des Voeux chase can load a Planning Department 3D Photo-realistic Model as a street-corridor donor where a LandsD individualised chart is blank. The mesh is real PlanD capture. It is off unless the page is opened with a flag. LandsD photographs stay mounted in the donor mode.
+
+This is not a claim that the chase looks like Sleeping Dogs. No WebGPU frame was captured for this cut.
+
+## What stays LandsD
+
+`11-SW-9C` and `11-SW-8D` still load when their manifests are present. A triangle is still dropped only when all three corners sample LandsD atlas padding. Photographic charts on those sheets are not replaced.
+
+`?pland=donor` draws the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. Unknown values, including any street-view bake, leave PlanD off.
+
+## Not a street-view atlas
+
+Do not plan a Mapillary or KartaView bake for the Henderson / Des Voeux podiums. The useful sequences are shot from vehicles and the shopfront is occluded, and CC BY-SA share-alike is the wrong licence to bake into this page.
+
+A Wikimedia Commons still of The Henderson facade exists and is CC0, for reference only. It is not a street atlas and it is not a texture in this cut. One file: [HK Central Charter Street n Murray Road The Henderson facade May 2025 R12S 04.jpg](https://commons.wikimedia.org/wiki/File:HK_Central_Charter_Street_n_Murray_Road_The_Henderson_facade_May_2025_R12S_04.jpg).
+
+## Age, and The Henderson
+
+Hong Kong Island in this dataset is aerial photography from March 2017. The files checked on 2026-10-24 are dated 21/02/2019. The Henderson at 2 Murray Road was completed in 2024. The Murray Road multi-storey car park on that site was demolished in 2018. The PlanD mesh shows the 2017 surface. Where a current LandsD chart of The Henderson is a hole, the donor shows that 2017 surface, not The Henderson’s shopfront. Nothing in this cut invents a later facade.
+
+## Fetch
+
+Dataset: [3D photo-realistic model](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model).
+
+```text
+GET https://pdmap.pland.gov.hk/plandapi/Tiles?e=&n=&fileType=
+```
+
+`e` and `n` are HK1980 grid metres (EPSG:2326). `fileType` is `OBJ`, `OSGB`, or `CESIUM`. No key. A hit returns `gridList[]` with `grid_name`, `loc_tc`, `file_url`, and `modi_date`. The specification PDF’s example (`e=834251`, `n=815501`, `fileType=OSGB`) is `tile_20_26`, 灣仔、金鐘及中環. That host in the PDF (`ppgis.pland.gov.hk`) now answers on `pdmap.pland.gov.hk`. On 2026-10-24 the live call for that coordinate still returned `tile_20_26` (fid 88, modi 21/02/2019).
+
+`tile_20_26` is not the Digit1 street. The Des Voeux eye, HK1980 about easting 834506.7, northing 815749.0, rounds to `e=834507&n=815749` and returns **`tile_21_26` only**. Northing 815750 is the seam with `tile_21_27` (the tile that contains the Statue Square origin, north of the eye). About 300 m along the look, Fairmont House and Lippo Centre fall in **`tile_22_26`**. The fetch asks the API every 125 m from the eye out to 500 m and keeps the unique tiles. It does not hard-code `tile_20_26`.
+
+```bash
+node tools/fetch-pland-central.mjs
+node tools/fetch-pland-central.mjs --tiles tile_21_26,tile_22_26
+node tools/fetch-pland-central.mjs --format CESIUM --keep-zip
+```
+
+OBJ is the page path. Each zip is one Altizure mesh (`config.json`, one `.obj`, one `.mtl`, four JPEGs), on the order of 80–250 MB compressed and one continuous surface, not a building. The tool clips that surface to the Digit1 corridor and writes `hk-3d/pland/manifest.json` plus `tile_…/corridor.gltf`. `hk-3d/` is gitignored. OSGB and CESIUM are the same capture; the tool can store those zips, and the page does not load them. A missing manifest leaves LandsD as it is.
+
+The clip drops triangles whose highest corner is below the sidewalk plus 1.2 m, so the road carpet is not a second carriageway. A facade that still touches the pavement stays. Triangles outside the chase corridor (500 m along heading 1.29, 72 m to either side) are dropped.
+
+## CRS
+
+OBJ is Z-up. `config.json` `model_transform` is row-major. On `tile_21_26` and `tile_21_27` (both read 2026-10-24) it is the same translation:
+
+```text
+easting  = x + 836974.635391304153
+northing = y + 815456.572217391338
+HKPD     = z
+```
+
+The first vertex of `tile_21_26/level_5_0_0.obj` lands on northing 815500, south of the corridor. The first vertex of `tile_21_27` lands about 8 m north of the Des Voeux eye (world x ≈ −2.33, z ≈ 20.84). Each zip still carries its own matrix. The tool does not assume the next tile matches.
+
+Horizontal placement then uses the same path as the LandsD sheets: HK1980 grid → WGS84 (−5.5″ latitude, +8.8″ longitude) → Central ENU, origin Statue Square. That path is about a metre from the Geodetic Survey API. See [HK_GLTF_CUT.md](HK_GLTF_CUT.md).
+
+Vertical placement does not snap the mesh minimum to the sidewalk. The config bounds include HKPD down to about −188 m, and that minimum would put the street in the sky. The pavement datum is the 10th percentile of HKPD within 18 m of the Des Voeux eye. World y is `(HKPD − that datum) + sidewalk` (sidewalk 0.22 m). Tiles that do not contain the eye reuse the eye tile’s datum. If no tile has pavement samples there, the tool stops rather than invent a height.
+
+The glTF stores Altizure local positions. The page applies `model_transform` and the datum when it mounts the mesh, which is the same function the tests check.
+
+## Measured clip
+
+`node tools/fetch-pland-central.mjs` on 2026-10-24 asked the API along the look and received two tiles: `tile_21_26` (eye, 125 m, 250 m) and `tile_22_26` (375 m, 500 m). Both zips use the translation above.
+
+`tile_21_26` has 19,283 pavement samples within 18 m of the eye. The 10th percentile is HKPD 5.349 m. `tile_22_26` has none, so it uses that same datum.
+
+| Tile | Triangles kept | Ground dropped | Outside dropped | World box |
+| --- | --- | --- | --- | --- |
+| tile_21_26 | 703,058 | 49,106 | 1,426,871 | x −8.1…241.9, z 28.2…174.7, y 0.14…285 |
+| tile_22_26 | 857,179 | 110,877 | 448,278 | x 241.9…490.5, z 28.2…237.2 |
+
+The Des Voeux eye (x −1.4, z 29.3) sits inside the `tile_21_26` box. The Henderson footprint (about x 218…264) straddles the tile edge at x ≈ 242, so the west of that site is `tile_21_26` and the east, with Fairmont House and Lippo Centre, is `tile_22_26`. The glTF buffers match their declared lengths and each tile keeps the four PlanD JPEGs. The clip is the capture’s own triangles, not a decimated stand-in. About 1.56 million triangles is a heavy page load. It stays behind the flag.
+
+## Page
+
+Default: no request to `hk-3d/pland/manifest.json`.
+
+| Query | What mounts |
+| --- | --- |
+| (none), `?pland=0`, `?pland=off` | LandsD only |
+| `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them |
+| `?pland=compare`, `?pland=ab` | PlanD corridor, LandsD individualised meshes left unmounted |
+
+While a PlanD manifest is loaded, footprint extrudes whose boxes sit in the Digit1 corridor are hidden, so the corridor is not glass in front of the aerial mesh. Gap walls outside that corridor are unchanged. The continuous mesh is not given a solid collider. A box around it would close Des Voeux.
+
+The loading line is 正在載入規劃署三維實景（中環街廊）…. The chart is drawn from the PlanD JPEG (already sunlit), with metalness 0. No shopfront is generated.
+
+## Digit1 cameras
+
+Person chase only. A helicopter or a flyover is not the comparison.
+
+| View | Query |
+| --- | --- |
+| Des Voeux eye, looking east | `index.html?pland=donor&at=-1.4,29.3,1.29` |
+| 25 m along that look | `index.html?pland=donor&at=22.6,36.2,1.29` |
+| South side of the same station | `index.html?pland=donor&at=-1.4,35.3,1.29` |
+
+The same three with `?pland=compare` are the A-B. Heading 1.29, person mode. What you should expect:
+
+- Donor: LandsD charts that already have a photograph stay in front. A triangle that was only LandsD atlas padding is a hole, and the 2017 aerial surface can show through it. If the PlanD shell sits proud of the LandsD shell, it will cover the photograph. That offset was not checked on a GPU.
+- Compare: the corridor is the continuous 2017 mesh, including roofs and the old Murray Road site. It is a different year from the LandsD individualised model, not a repaired 2024 podium.
+- Neither view is a present-day shopfront survey.
+
+## Attribution
+
+© 香港特別行政區政府規劃署 3D Photo-realistic Model / [DATA.GOV.HK](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model).
+
+PlanD publishes the model for reference. The department does not warrant fitness for a particular use and does not promise a later edition. This page names the department and the dataset. LandsD / Open3Dhk attribution on the individualised sheets is unchanged.
+
+## Residual risks
+
+- March 2017 aerial, files dated February 2019. The Henderson (completed 2024) is not in the mesh. The site is the car-park era.
+- One continuous mesh per tile, not a building with its own chart. The corridor clip is a geometric cut, not a semantic one.
+- About a metre of horizontal datum, shared with the LandsD path.
+- The vertical datum is the eye-pavement percentile, not a DTM. A step along the street is only as good as that single offset.
+- Donor depth offset is unverified on WebGPURenderer. Compare mode is the check that does not depend on it.
+- Corridor extrudes are hidden whenever the manifest loads. A gap in the clip is empty rather than a glass wall.
+- No collider on the PlanD mesh, so the person walks through it.
+- Full-tile OBJ is too heavy to mount. The page mounts the clip only: 703,058 triangles on `tile_21_26` and 857,179 on `tile_22_26`. That is the capture, not a decimated mesh, and it is a heavy browser load. GSD in these configs is about 0.06 m.
+- OSGB and CESIUM are not on the runtime path.
+- This environment did not take a WebGPU capture of the three cameras.

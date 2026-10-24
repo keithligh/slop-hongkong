@@ -9,6 +9,7 @@ import { buildBoroughs } from './boroughs.js';
 import { buildLandmarks } from './landmarks.js';
 import { buildCityBlocks } from './buildings.js';
 import { mountHkGltfBuildings, prepareHkGltfSheet } from './hk-gltf.js';
+import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
 import { buildStreetDetails } from './street-details.js';
 import { createTrafficSystem, createHighwayTraffic } from './traffic.js';
 import { buildRoadPaint } from './road-paint.js';
@@ -74,9 +75,15 @@ async function initApp() {
     loadingStatus.textContent = '正在建構香港街道、海岸與樓宇…';
   }
 
-  // 3. Hong Kong coast, footprint blocks, empty landmark slots, street details, and traffic
-  const gltfPlan = await prepareHkGltfSheet(window.location.href);
-  if (loadingStatus && gltfPlan) loadingStatus.textContent = '正在載入地政總署單體建築模型…';
+  // 3. Hong Kong coast, footprint blocks, empty landmark slots, street details, and traffic.
+  // PlanD is off unless ?pland=donor or ?pland=compare. Donor keeps LandsD and fills
+  // atlas holes with the 2017 aerial mesh. Compare leaves the LandsD meshes unmounted.
+  const plandPlan = await preparePlandCorridor(window.location.href);
+  let gltfPlan = await prepareHkGltfSheet(window.location.href);
+  if (plandPlan) gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
+  if (loadingStatus && gltfPlan?.selected?.length && plandPlan?.mode !== 'compare') {
+    loadingStatus.textContent = '正在載入地政總署單體建築模型…';
+  }
   const cityGrid = buildCityGrid(scene, gltfPlan);
   markInit('cityGrid');
   const boroughs = buildBoroughs(scene, { sidewalks: cityGrid.sidewalks });
@@ -85,8 +92,14 @@ async function initApp() {
   markInit('landmarks');
   const cityBlocks = buildCityBlocks(scene, gltfPlan);
   markInit('blocks');
-  const gltfBuildings = await mountHkGltfBuildings(scene, gltfPlan);
+  const gltfBuildings = plandPlan?.mode === 'compare'
+    ? { colliders: [], loaded: 0, failed: 0, group: null }
+    : await mountHkGltfBuildings(scene, gltfPlan);
+  if (plandPlan?.mode === 'compare') console.info('[pland] compare: LandsD individualised meshes stay off');
   markInit('gltf');
+  if (loadingStatus && plandPlan) loadingStatus.textContent = '正在載入規劃署三維實景（中環街廊）…';
+  await mountPlandCorridor(scene, plandPlan);
+  markInit('pland');
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...gltfBuildings.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
 
   const streetDetails = buildStreetDetails(scene, gltfPlan);

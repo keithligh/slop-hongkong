@@ -78,7 +78,7 @@ test('Hong Kong boot builders stay on the harbour, landmark, and Central footpri
 
 test('native module entry and imports share canonical preloaded URLs on GitHub Pages', () => {
   const links = preloads.map((match) => match[1]);
-  assert.equal(links.length, 38);
+  assert.equal(links.length, 40);
   assert.equal(new Set(links).size, links.length, 'each module is preloaded once');
   assert.equal(entries.length, 1);
   assert.equal(entries[0][1], './js/main.js');
