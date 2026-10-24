@@ -9,6 +9,7 @@ import {
   boundsFromGltf,
   chooseCentralSheet,
   formatGltfLog,
+  bakeGltfWorldTriangles,
   gltfAlbedoSampler,
   gltfInStreetChase,
   gltfStreetPhoto,
@@ -290,6 +291,36 @@ test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses 
   assert.equal(gltfAlbedoSampler(behind).maxEdge, 2048);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);
+});
+
+test('a baked LandsD triangle sits on the sidewalk and the boot passes it to the look ray', () => {
+  const positions = new Float32Array([0, 0, 0, 4, 0, 0, 0, 12, 1]);
+  const doc = {
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    accessors: [{
+      bufferView: 0,
+      componentType: 5126,
+      count: 3,
+      type: 'VEC3',
+      min: [0, 0, 0],
+      max: [4, 12, 1]
+    }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: positions.byteLength }],
+    buffers: [{ byteLength: positions.byteLength }]
+  };
+  const solid = bakeGltfWorldTriangles(doc, [new Uint8Array(positions.buffer)]);
+  assert.equal(solid.triangles.length, 9);
+  assert.ok(Math.abs(solid.minY - ISLAND_BOUNDS.sidewalkHeight) < 1e-4);
+  assert.ok(Math.abs(solid.maxY - (ISLAND_BOUNDS.sidewalkHeight + 12)) < 1e-4);
+  const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
+  const gltf = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(grid, /lookSolids/);
+  assert.match(grid, /solids: lookSolids/);
+  assert.match(gltf, /loadLookSolids/);
+  assert.match(gltf, /bakeGltfWorldTriangles/);
 });
 
 test('a Des Voeux facade keeps its cap slot ahead of a closer block behind the camera', () => {

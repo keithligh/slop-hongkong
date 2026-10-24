@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { HK_CORE_WORLD, HONG_KONG_ISLAND_COASTLINE, ROADS, BLOCKS, blockInHkCore, hkFootprintHeight } from '../js/city-config.js';
+import { HK_CORE_WORLD, HK_RETAIL_BELT, HONG_KONG_ISLAND_COASTLINE, ROADS, BLOCKS, blockInHkCore, hkFootprintHeight } from '../js/city-config.js';
+import { digit1ChasePose } from '../js/digit1-probe-frame.js';
 import { canyonGlassWalls, clipCanyonWalls, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
 
 function contains(wall, x, z) {
@@ -324,4 +325,88 @@ test('a tall mesh beside the look ray drops the curtain; a kiosk or the far side
   const retail = clipCanyonWalls([wall], [tower], { eye, near: 80, sample: 4, minLen: 3.2 });
   assert.equal(retail.length, 1);
   assert.ok(retail[0].len > 12);
+});
+
+function lookWall(eye, along, side) {
+  const fx = Math.sin(eye.heading);
+  const fz = Math.cos(eye.heading);
+  const sx = -fz;
+  const sz = fx;
+  return {
+    x: eye.x + fx * along + sx * side,
+    z: eye.z + fz * along + sz * side,
+    yaw: Math.atan2(fx, fz),
+    depth: 12,
+    len: 16,
+    side: 1,
+    rx: sx,
+    rz: sz,
+    dx: fx,
+    dz: fz,
+    raw: 'QUEENSWAY',
+    highway: false,
+    narrow: false
+  };
+}
+
+// A triangle around a point, facing back toward the camera. The ray through
+// the glass sample has to land inside it.
+function solidOnRay(origin, dir, t) {
+  const px = origin.x + dir.x * t;
+  const py = origin.y + dir.y * t;
+  const pz = origin.z + dir.z * t;
+  const ax = -dir.z;
+  const az = dir.x;
+  const span = Math.hypot(ax, az) || 1;
+  const ux = ax / span;
+  const uz = az / span;
+  const s = 28;
+  // Winding faces the camera so the front-face test accepts the ray.
+  const triangles = new Float32Array([
+    px - ux * s, py - s, pz - uz * s,
+    px + ux * s, py - s, pz + uz * s,
+    px, py + s, pz
+  ]);
+  return {
+    minX: px - s,
+    maxX: px + s,
+    minY: py - s,
+    maxY: py + s,
+    minZ: pz - s,
+    maxZ: pz + s,
+    triangles
+  };
+}
+
+test('a triangle past the 260 m box cap drops look glass; the box alone does not', () => {
+  const eye = digit1Eye;
+  const wall = lookWall(eye, 120, 20);
+  const pose = digit1ChasePose(eye);
+  const y = HK_RETAIL_BELT + 1.2;
+  const dx = wall.x - pose.cam.x;
+  const dy = y - pose.cam.y;
+  const dz = wall.z - pose.cam.z;
+  const dist = Math.hypot(dx, dy, dz);
+  const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
+  const farBox = {
+    minX: pose.cam.x + dir.x * 340 - 8,
+    maxX: pose.cam.x + dir.x * 340 + 8,
+    minZ: pose.cam.z + dir.z * 340 - 8,
+    maxZ: pose.cam.z + dir.z * 340 + 8,
+    minH: 1,
+    maxH: 150
+  };
+  assert.equal(canyonGlassWalls([wall], [farBox], { eye }).length, 1);
+  const lippo = solidOnRay(pose.cam, dir, 340);
+  assert.equal(canyonGlassWalls([wall], [], { eye, solids: [lippo] }).length, 0);
+  const pastReach = solidOnRay(pose.cam, dir, 560);
+  assert.equal(canyonGlassWalls([wall], [], { eye, solids: [pastReach] }).length, 1);
+  const missed = solidOnRay(
+    { x: pose.cam.x + 40, y: pose.cam.y, z: pose.cam.z },
+    dir,
+    340
+  );
+  assert.equal(canyonGlassWalls([wall], [], { eye, solids: [missed] }).length, 1);
+  const retail = clipCanyonWalls([wall], [farBox], { eye, near: 80, sample: 4, minLen: 3.2 });
+  assert.equal(retail.length, 1);
 });

@@ -244,10 +244,12 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
   });
   wallMat.name = 'hkCanyonGlass';
   const ribbons = walls.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
-  const glass = gltfMeshes.length ? canyonGlassWalls(walls, gltfMeshes, {
+  const lookSolids = gltfPlan?.lookSolids || [];
+  const glass = gltfMeshes.length || lookSolids.length ? canyonGlassWalls(walls, gltfMeshes, {
     eye: HK_STREET_EYE,
     belt: HK_RETAIL_BELT,
-    sidewalk: ISLAND_BOUNDS.sidewalkHeight
+    sidewalk: ISLAND_BOUNDS.sidewalkHeight,
+    solids: lookSolids
   }) : walls;
   const glassRibbons = glass.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const baseY = 0.16;

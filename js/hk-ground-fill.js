@@ -406,6 +406,54 @@ function glassPointHitsMesh(origin, dir, boxes, beyond, reach) {
   return false;
 }
 
+// Front face only. A LandsD shell's box can contain the ray with no triangle
+// on it; this is the hit the box test is not allowed to invent.
+function rayTriangle(origin, dir, ax, ay, az, bx, by, bz, cx, cy, cz) {
+  const e1x = bx - ax;
+  const e1y = by - ay;
+  const e1z = bz - az;
+  const e2x = cx - ax;
+  const e2y = cy - ay;
+  const e2z = cz - az;
+  const px = dir.y * e2z - dir.z * e2y;
+  const py = dir.z * e2x - dir.x * e2z;
+  const pz = dir.x * e2y - dir.y * e2x;
+  const det = e1x * px + e1y * py + e1z * pz;
+  if (det <= 1e-12) return null;
+  const inv = 1 / det;
+  const sx = origin.x - ax;
+  const sy = origin.y - ay;
+  const sz = origin.z - az;
+  const u = (sx * px + sy * py + sz * pz) * inv;
+  if (u < 0 || u > 1) return null;
+  const qx = sy * e1z - sz * e1y;
+  const qy = sz * e1x - sx * e1z;
+  const qz = sx * e1y - sy * e1x;
+  const v = (dir.x * qx + dir.y * qy + dir.z * qz) * inv;
+  if (v < 0 || u + v > 1) return null;
+  const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+  return t > 0.2 ? t : null;
+}
+
+function glassPointHitsSolid(origin, dir, solids, beyond, reach) {
+  for (const solid of solids) {
+    if (!solid?.triangles || solid.triangles.length < 9) continue;
+    const boxT = rayAabb(origin, dir, solid);
+    if (boxT == null || boxT > reach) continue;
+    const src = solid.triangles;
+    for (let i = 0; i + 8 < src.length; i += 9) {
+      const t = rayTriangle(
+        origin, dir,
+        src[i], src[i + 1], src[i + 2],
+        src[i + 3], src[i + 4], src[i + 5],
+        src[i + 6], src[i + 7], src[i + 8]
+      );
+      if (t != null && t > beyond && t <= reach) return true;
+    }
+  }
+  return false;
+}
+
 // Closest point of a tall box to the ribbon's outer face. The box counts when
 // that point lies on the lot side (not across the carriageway) and within
 // `behind` metres. A facade beside the outward normal still counts: the camera
@@ -438,6 +486,8 @@ function tallMeshBehindCell(x, z, wall, boxes, behind) {
 // above it does not. From the Des Voeux chase, a glass sample is omitted when
 // a loaded mesh is the facade that curtain stands in for:
 // - the look ray meets a mesh beyond the ribbon and within `cover`, or
+// - the same ray meets a triangle of a loaded chase mesh past `cover` and
+//   within the corridor reach (a hollow shell's box is not that hit), or
 // - a mesh that rises through the belt sits on the lot side of the cell,
 //   within `behind` metres of the outer face (the ray can miss that box).
 // A sample outside the look corridor, a short kiosk, or a far courtyard keeps
@@ -460,10 +510,15 @@ export function canyonGlassWalls(walls, meshes, {
   behind = 36,
   // The mesh has to occupy the curtain band. A rise that stops in the
   // shopfront is the kiosk case and does not delete the glass above it.
-  tall = 1
+  tall = 1,
+  // Triangles of loaded meshes whose boxes start past `cover`. The box test
+  // stops at 260 m so a hollow courtyard shell cannot delete the curtain.
+  // A real triangle further down the same ray still can, out to the corridor.
+  solids = null
 } = {}) {
   const list = (meshes || []).map((mesh) => meshRiseBox(mesh, sidewalk)).filter(Boolean);
-  if (!eye || !list.length) return (walls || []).slice();
+  const solidList = (solids || []).filter((solid) => solid?.triangles?.length >= 9);
+  if (!eye || (!list.length && !solidList.length)) return (walls || []).slice();
   const tallBoxes = list.filter((box) => box.maxY > belt + tall);
   const look = chaseLook(eye);
   const out = [];
@@ -491,7 +546,8 @@ export function canyonGlassWalls(walls, meshes, {
       const dz = z - look.origin.z;
       const dist = Math.hypot(dx, dy, dz) || 1;
       const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
-      const ray = glassPointHitsMesh(look.origin, dir, list, dist + 2, cover);
+      const ray = glassPointHitsMesh(look.origin, dir, list, dist + 2, cover)
+        || glassPointHitsSolid(look.origin, dir, solidList, dist + 2, reach);
       const lot = tallMeshBehindCell(x, z, wall, tallBoxes, behind);
       drop.push(ray || lot);
     }

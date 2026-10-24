@@ -1,9 +1,12 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, ISLAND_BOUNDS } from './city-config.js';
+import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS } from './city-config.js';
 import {
+  bakeGltfWorldTriangles,
+  boxClosestDistance,
   formatGltfLog,
   gltfAlbedoSampler,
+  gltfInStreetChase,
   hiddenExtrudeIds,
   hk80ToWorld,
   landsdAlbedoRow,
@@ -210,6 +213,41 @@ function sharpenPhoto(material, sampler) {
   }
 }
 
+// Boxes inside this distance can already satisfy the 260 m look-ray test.
+// Farther chase meshes are baked so a real triangle past that cap can drop
+// glass without a hollow shell's box doing it.
+const LOOK_SOLID_PAST = 200;
+
+async function fetchLookSolid(entry) {
+  const res = await fetch(entry.url);
+  if (!res.ok) throw new Error(String(res.status));
+  const doc = await res.json();
+  const base = new URL(entry.url, window.location.href);
+  const buffers = [];
+  for (const buffer of doc.buffers || []) {
+    if (!buffer.uri || buffer.uri.startsWith('data:')) throw new Error('embedded buffer');
+    const bufRes = await fetch(new URL(buffer.uri, base));
+    if (!bufRes.ok) throw new Error(String(bufRes.status));
+    buffers.push(new Uint8Array(await bufRes.arrayBuffer()));
+  }
+  return bakeGltfWorldTriangles(doc, buffers);
+}
+
+export async function loadLookSolids(entries, eye = HK_STREET_EYE) {
+  const solids = [];
+  for (const entry of entries || []) {
+    if (!entry?.url || !gltfInStreetChase(entry, eye)) continue;
+    if (boxClosestDistance(entry, eye) <= LOOK_SOLID_PAST) continue;
+    try {
+      const solid = await fetchLookSolid(entry);
+      if (solid) solids.push(solid);
+    } catch (err) {
+      console.warn(`[gltf] look solid ${entry.file || entry.url}: ${err.message || err}`);
+    }
+  }
+  return solids;
+}
+
 async function readSheetManifest(sheet) {
   const manifestUrl = `./hk-3d/${sheet}/manifest.json`;
   const res = await fetch(manifestUrl);
@@ -267,15 +305,22 @@ export async function prepareHkGltfSheet(href) {
     console.info(`[gltf] digit1 probe buildings ${plan.selected.map((entry) => entry.name || entry.file).join(' ')}`);
   }
   const hidden = hiddenExtrudeIds(BLOCKS, plan.selected);
+  const selected = plan.selected.map((entry) => ({
+    ...entry,
+    url: `./hk-3d/${entry.sheet}/${entry.file}`
+  }));
+  const lookSolids = probe ? [] : await loadLookSolids(selected);
+  if (lookSolids.length) {
+    const triangles = lookSolids.reduce((sum, solid) => sum + solid.triangles.length / 9, 0);
+    console.info(`[gltf] look solids ${lookSolids.length} triangles ${triangles}`);
+  }
   return {
     ...plan,
     sheet: loadedSheets.join('+'),
     sheets: loadedSheets,
     hiddenIds: new Set(hidden),
-    selected: plan.selected.map((entry) => ({
-      ...entry,
-      url: `./hk-3d/${entry.sheet}/${entry.file}`
-    }))
+    selected,
+    lookSolids
   };
 }
 

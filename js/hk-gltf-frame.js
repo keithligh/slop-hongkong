@@ -342,6 +342,133 @@ export function landsdNullFillTriangles(index, sampleVertex, sampleCentroid) {
   return { index: kept, dropped };
 }
 
+const COMPS = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+
+function componentBytes(type) {
+  if (type === 5120 || type === 5121) return 1;
+  if (type === 5122 || type === 5123) return 2;
+  if (type === 5125 || type === 5126) return 4;
+  return 0;
+}
+
+function readComponent(view, offset, type) {
+  switch (type) {
+    case 5120: return view.getInt8(offset);
+    case 5121: return view.getUint8(offset);
+    case 5122: return view.getInt16(offset, true);
+    case 5123: return view.getUint16(offset, true);
+    case 5125: return view.getUint32(offset, true);
+    case 5126: return view.getFloat32(offset, true);
+    default: {
+      const unknown = type;
+      throw new Error(`gltf component ${unknown}`);
+    }
+  }
+}
+
+function readAccessor(doc, index, buffers) {
+  const acc = doc.accessors[index];
+  const view = doc.bufferViews[acc.bufferView];
+  const buf = buffers[view.buffer];
+  const bytes = componentBytes(acc.componentType);
+  if (!buf || !bytes) throw new Error('gltf accessor buffer');
+  const data = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const comps = COMPS[acc.type];
+  if (!comps) throw new Error(`gltf accessor ${acc.type}`);
+  const start = (view.byteOffset || 0) + (acc.byteOffset || 0);
+  const stride = view.byteStride || comps * bytes;
+  const out = new Float64Array(acc.count * comps);
+  for (let i = 0; i < acc.count; i++) {
+    const base = start + i * stride;
+    for (let c = 0; c < comps; c++) out[i * comps + c] = readComponent(data, base + c * bytes, acc.componentType);
+  }
+  return out;
+}
+
+// World triangles for one LandsD building, sidewalk-snapped the same way the
+// mounted mesh is. Used to test look rays past the box cap, where a hollow
+// shell's bounds are not a facade. Returns null when the file has no positions.
+export function bakeGltfWorldTriangles(doc, buffers, sidewalk = ISLAND_BOUNDS.sidewalkHeight) {
+  if (!doc) return null;
+  const nodes = doc.nodes || [];
+  const worlds = new Array(nodes.length);
+  function worldOf(index, parent) {
+    if (worlds[index]) return worlds[index];
+    const node = nodes[index] || {};
+    const m = parent ? mulMat4(parent, localMatrix(node)) : localMatrix(node).slice();
+    worlds[index] = m;
+    for (const child of node.children || []) worldOf(child, m);
+    return m;
+  }
+  const scene = (doc.scenes || [])[doc.scene || 0] || { nodes: [] };
+  for (const index of scene.nodes || []) worldOf(index, null);
+  const parts = [];
+  let minH = Infinity;
+  nodes.forEach((node, index) => {
+    if (node.mesh == null) return;
+    const mesh = (doc.meshes || [])[node.mesh];
+    const m = worlds[index] || localMatrix(node);
+    for (const prim of mesh?.primitives || []) {
+      if (prim.attributes?.POSITION == null) continue;
+      const pos = readAccessor(doc, prim.attributes.POSITION, buffers);
+      const count = pos.length / 3;
+      const placed = new Float64Array(pos.length);
+      for (let i = 0; i < count; i++) {
+        const p = applyMat4(m, pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+        const [x, , z] = hk80ToWorld(p[0], -p[2], p[1]);
+        placed[i * 3] = x;
+        placed[i * 3 + 1] = p[1];
+        placed[i * 3 + 2] = z;
+        if (p[1] < minH) minH = p[1];
+      }
+      let indexData;
+      if (prim.indices != null) indexData = readAccessor(doc, prim.indices, buffers);
+      else {
+        indexData = new Float64Array(count);
+        for (let i = 0; i < count; i++) indexData[i] = i;
+      }
+      parts.push({ placed, indexData });
+    }
+  });
+  if (!parts.length || !Number.isFinite(minH)) return null;
+  const shift = sidewalk - minH;
+  const floats = [];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const part of parts) {
+    const { placed, indexData } = part;
+    for (let i = 1; i < placed.length; i += 3) placed[i] += shift;
+    for (let t = 0; t + 2 < indexData.length; t += 3) {
+      for (const id of [indexData[t], indexData[t + 1], indexData[t + 2]]) {
+        const x = placed[id * 3];
+        const y = placed[id * 3 + 1];
+        const z = placed[id * 3 + 2];
+        floats.push(x, y, z);
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (z < minZ) minZ = z;
+        if (z > maxZ) maxZ = z;
+      }
+    }
+  }
+  if (floats.length < 9) return null;
+  return {
+    minX,
+    maxX,
+    minY,
+    maxY,
+    minZ,
+    maxZ,
+    triangles: Float32Array.from(floats)
+  };
+}
+
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
   if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 1, minFilter: 'linear' };
