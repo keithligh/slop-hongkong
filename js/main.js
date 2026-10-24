@@ -70,7 +70,7 @@ async function initApp() {
   markInit('lighting');
 
   if (loadingStatus) {
-    loadingStatus.textContent = 'Constructing Manhattan Grid, Landmarks & Streetscape...';
+    loadingStatus.textContent = 'Constructing the city grid, landmarks & streetscape...';
   }
 
   // 3. Build Manhattan Geography, Iconic Landmarks, Blocks, Street Details & Traffic
