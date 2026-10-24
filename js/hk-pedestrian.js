@@ -3,7 +3,7 @@
 // a footway or sidewalk way, a crossing node, a bus_stop node, a bench, a street lamp.
 // Nothing is added where the extract has no feature.
 
-import { carriagewayWidth, segmentFrame } from './hk-road-deck.js';
+import { carriagewayWidth, HK_KERB_STONE, segmentFrame } from './hk-road-deck.js';
 
 export const HK_SIDEWALK_WIDTH = 3.4;
 export const HK_FOOTWAY_WIDTH = 2.05;
@@ -264,6 +264,32 @@ function inCarriageway(grid, x, z) {
   return !!(hit && hit.d < hit.seg.half - 0.35);
 }
 
+// Keep the outer edge of an OSM walk. If the inner edge crosses the kerb,
+// pull it back to the stone and drop a sliver that would not read as pavement.
+function seatWalk(frame, width, grid) {
+  const hit = nearestRoad(grid, frame.x, frame.z, 24);
+  if (!hit) return { x: frame.x, z: frame.z, yaw: frame.yaw, w: width, len: frame.len };
+  if (hit.d < hit.seg.half - 0.35) return null;
+  const side = (frame.x - hit.x) * hit.seg.rx + (frame.z - hit.z) * hit.seg.rz;
+  const sign = side >= 0 ? 1 : -1;
+  const inner = hit.d - width * 0.5;
+  const outer = hit.d + width * 0.5;
+  const kerbBack = hit.seg.half + HK_KERB_STONE;
+  if (inner + 0.02 >= kerbBack) {
+    return { x: frame.x, z: frame.z, yaw: frame.yaw, w: width, len: frame.len };
+  }
+  const nextW = outer - kerbBack;
+  if (!(nextW >= 0.7)) return null;
+  const shift = kerbBack + nextW * 0.5 - hit.d;
+  return {
+    x: frame.x + hit.seg.rx * sign * shift,
+    z: frame.z + hit.seg.rz * sign * shift,
+    yaw: frame.yaw,
+    w: nextW,
+    len: frame.len
+  };
+}
+
 function faceYaw(stop, hit) {
   if (!hit) return 0;
   const side = (stop.x - hit.x) * hit.seg.rx + (stop.z - hit.z) * hit.seg.rz;
@@ -283,8 +309,9 @@ export function planHkStreetGround(features, roads) {
     for (let i = 0; i + 3 < pts.length; i += 2) {
       const frame = segmentFrame(pts[i], pts[i + 1], pts[i + 2], pts[i + 3], 0.8);
       if (!frame) continue;
-      if (inCarriageway(grid, frame.x, frame.z)) continue;
-      walks.push({ x: frame.x, z: frame.z, yaw: frame.yaw, w: width, len: frame.len });
+      const seated = seatWalk(frame, width, grid);
+      if (!seated) continue;
+      walks.push(seated);
     }
   }
   const areas = [];

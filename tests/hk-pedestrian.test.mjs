@@ -96,6 +96,7 @@ test('a sidewalk is paved beside the carriageway and a way in the lane is not', 
   const plan = planHkStreetGround(features, roads);
   assert.ok(plan.walks.length >= 1);
   assert.ok(plan.walks.every((walk) => Math.abs(walk.x) > 4), 'the lane centre is not paved');
+  assert.ok(plan.walks.some((walk) => walk.w === HK_SIDEWALK_WIDTH));
   assert.equal(plan.crossingSites, 1);
   assert.equal(plan.crossings.length, 6);
   assert.equal(plan.stops.length, 1);
@@ -103,6 +104,24 @@ test('a sidewalk is paved beside the carriageway and a way in the lane is not', 
   assert.equal(plan.stops[0].inRoad, false);
   assert.equal(plan.furniture.length, 1);
   assert.equal(plan.furniture[0].kind, 'bench');
+});
+
+test('a walk that crosses the kerb keeps its outer edge and stops at the stone', () => {
+  const roads = [{ w: 10, lanes: 3, pts: [{ x: 0, z: 0 }, { x: 0, z: 40 }] }];
+  const plan = planHkStreetGround({
+    walks: [{ w: 3.4, pts: [6, 0, 6, 20] }],
+    areas: [],
+    crossings: [],
+    stops: [],
+    furniture: []
+  }, roads);
+  assert.equal(plan.walks.length, 1);
+  const walk = plan.walks[0];
+  const inner = Math.abs(walk.x) - walk.w / 2;
+  const outer = Math.abs(walk.x) + walk.w / 2;
+  assert.ok(Math.abs(inner - 5.18) < 1e-6);
+  assert.ok(Math.abs(outer - 7.7) < 1e-6);
+  assert.ok(walk.w < HK_SIDEWALK_WIDTH);
 });
 
 test('an empty extract adds no pavement and no bus stop', () => {
@@ -139,6 +158,7 @@ test('Des Voeux eye height has mapped pavement, a zebra, and the Statue Square s
   const html = readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(grid, /planHkStreetGround\(HK_PEDESTRIAN, ROADS\)/);
   assert.match(grid, /HkOsmPavement/);
+  assert.match(grid, /hkSpan/);
   assert.match(grid, /HkCrossings/);
   assert.match(grid, /HkBusStopSign/);
   assert.match(html, /hk-pedestrian-data\.js/);

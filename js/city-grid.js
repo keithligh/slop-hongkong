@@ -131,6 +131,12 @@ function addHkRibbonMesh(group, mat, segs, y, height, name, renderOrder = 0) {
     mesh.setMatrixAt(i, dummy.matrix);
   }
   mesh.instanceMatrix.needsUpdate = true;
+  const span = new Float32Array(segs.length * 2);
+  for (let i = 0; i < segs.length; i++) {
+    span[i * 2] = segs[i].w;
+    span[i * 2 + 1] = segs[i].len;
+  }
+  geo.setAttribute('hkSpan', new THREE.InstancedBufferAttribute(span, 2));
   mesh.computeBoundingSphere();
   group.add(mesh);
   return mesh;
@@ -157,11 +163,13 @@ function buildHkRoadRibbons(group, roadMat, sidewalkMat) {
     if (mark.color === 'yellow') yellow.push(mark);
     else white.push(mark);
   }
-  addHkRibbonMesh(group, asphaltMat, deck.asphalt, 0.02, 0.055, 'HkRoadCentrelines', 1);
-  if (sidewalkMat) addHkRibbonMesh(group, sidewalkMat, deck.sidewalks, 0.02, 0.2, 'HkSidewalks', 1);
+  // Road top 0.07. Kerb rises from the asphalt to the sidewalk top at 0.22.
+  // The walk starts above the road so the stone face is the upstand between them.
+  addHkRibbonMesh(group, asphaltMat, deck.asphalt, 0.02, 0.05, 'HkRoadCentrelines', 1);
+  if (sidewalkMat) addHkRibbonMesh(group, sidewalkMat, deck.sidewalks, 0.08, 0.14, 'HkSidewalks', 1);
   addHkRibbonMesh(group, curbMat, deck.curbs, 0.02, 0.2, 'HkCurbs', 2);
-  addHkRibbonMesh(group, whiteMat, white, 0.078, 0.03, 'HkLaneMarkingsWhite', 3);
-  addHkRibbonMesh(group, yellowMat, yellow, 0.08, 0.03, 'HkLaneMarkingsYellow', 3);
+  addHkRibbonMesh(group, whiteMat, white, 0.072, 0.012, 'HkLaneMarkingsWhite', 3);
+  addHkRibbonMesh(group, yellowMat, yellow, 0.074, 0.012, 'HkLaneMarkingsYellow', 3);
   const graphLinks = GEO.roadGraph && GEO.roadGraph.links ? GEO.roadGraph.links.length : 0;
   console.info(
     `[roads] HK asphalt ${deck.asphalt.length} sidewalks ${deck.sidewalks.length} ` +
@@ -308,15 +316,20 @@ function buildHkPedestrianGround(group) {
   walkMat.polygonOffset = true;
   walkMat.polygonOffsetFactor = -2;
   walkMat.polygonOffsetUnits = -2;
-  addHkRibbonMesh(group, walkMat, plan.walks, 0.03, 0.19, 'HkOsmPavement', 1);
+  const areaMat = createSidewalkMaterial({ ribbon: false });
+  areaMat.name = 'hkOsmPedestrianArea';
+  areaMat.polygonOffset = true;
+  areaMat.polygonOffsetFactor = -2;
+  areaMat.polygonOffsetUnits = -2;
+  addHkRibbonMesh(group, walkMat, plan.walks, 0.08, 0.14, 'HkOsmPavement', 1);
   for (const ring of plan.areas) {
-    const mesh = createExtrudedPolygonMesh(ring, 0.03, 0.19, walkMat, true, false);
+    const mesh = createExtrudedPolygonMesh(ring, 0.08, 0.14, areaMat, true, false);
     mesh.name = 'HkOsmPedestrianArea';
     group.add(mesh);
   }
   const zebra = createLaneStripeMaterial(0xf4f1e8);
   zebra.name = 'hkCrossing';
-  addHkRibbonMesh(group, zebra, plan.crossings, 0.09, 0.025, 'HkCrossings', 4);
+  addHkRibbonMesh(group, zebra, plan.crossings, 0.078, 0.016, 'HkCrossings', 4);
 
   const poleMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a4046, roughness: 0.62, metalness: 0.18 });
   poleMat.name = 'hkBusPole';

@@ -1317,12 +1317,11 @@ function createLaneStripeMaterial(hex) {
 }
 
 /**
- * NYC Concrete Sidewalk Flagstones with Filter-Width Anti-Aliased 1.5m Scored Expansion Joints,
- * -12mm `bumpNormal` Groove Relief, Per-Flag Tone Variation & Post-Rain Damp Patches
- * that follow cityUniforms.uRoadWetness like the roadway (better drained: fewer, smaller pools)
- * (Ported from SidewalkGenerator.js)
+ * Concrete sidewalk flags. Ribbon meshes carry hkSpan (width, length) so the
+ * joints run across and along the pavement. A diagonal street then reads as
+ * flags, not a world-axis diamond. Areas with no span keep world metres.
  */
-function createSidewalkMaterial() {
+function createSidewalkMaterial({ ribbon = true } = {}) {
   const mat = new THREE.MeshStandardNodeMaterial({
     metalness: 0.0,
     roughness: 0.88
@@ -1330,60 +1329,71 @@ function createSidewalkMaterial() {
 
   const cConcreteA = color(0x8e8d85);
   const cConcreteB = color(0x73726b);
+  const acrossPeriod = 0.45;
+  const alongPeriod = 0.9;
+  const jointHalf = 0.006;
 
-  // Damp patches & pools on the flags, shared by every channel below (own field; drains better than the roadway)
+  // Ribbons are instanced and carry hkSpan. Areas are ordinary meshes and stay
+  // on world metres, so the two draws do not share one attribute step.
+  let swX = positionWorld.x;
+  let swZ = positionWorld.z;
+  if (ribbon) {
+    const span = attribute('hkSpan', 'vec2');
+    const onRibbon = step(float(0.2), span.y);
+    swX = mix(positionWorld.x, positionGeometry.x.mul(span.x), onRibbon);
+    swZ = mix(positionWorld.z, positionGeometry.z.mul(span.y), onRibbon);
+  }
+
+  // Damp patches stay in the city frame. Joints and flag tone follow the ribbon.
   const swField = noise2D(vec2(positionWorld.x.mul(0.14).add(7.4), positionWorld.z.mul(0.14).sub(13.1))).mul(0.65)
     .add(noise2D(vec2(positionWorld.x.mul(0.38), positionWorld.z.mul(0.38))).mul(0.35));
   const swWet = roadWetMasks(swField, 0.06);
   const swPuddle = swWet.y.mul(smoothstep(0.5, 0.9, normalWorldGeometry.y));
   const swFresnel = pow(float(1.0).sub(clamp(normalize(cameraPosition.sub(positionWorld)).y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
-  const pixelSize = length(fwidth(positionWorld.xz));
 
   mat.aoNode = canyonSkyAONode();
 
   mat.colorNode = Fn(() => {
-    const wx = positionWorld.x;
-    const wz = positionWorld.z;
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(190.0, 16.0, camDist);
+    const pixelSize = length(fwidth(vec2(swX, swZ)));
 
-    const panel = 1.5; // 5 ft NYC concrete sidewalk flags
-    const panelHash = hash2D(floor(vec2(wx.div(panel), wz.div(panel))));
-    const tone = noise2D(vec2(wx.mul(0.48), wz.mul(0.48)));
-    const grit = noise2D(vec2(wx.mul(14.0), wz.mul(14.0))).sub(0.5).mul(0.08).mul(detail).mul(smoothstep(0.07, 0.02, pixelSize));
+    const panelHash = hash2D(floor(vec2(swX.div(acrossPeriod), swZ.div(alongPeriod))));
+    const tone = noise2D(vec2(swX.mul(0.48), swZ.mul(0.48)));
+    const grit = noise2D(vec2(swX.mul(14.0), swZ.mul(14.0))).sub(0.5).mul(0.08).mul(detail).mul(smoothstep(0.07, 0.02, pixelSize));
 
-    // Filter-width anti-aliased 1.5m scored joints
-    const joints = max(gridLine(wx, panel, 0.042), gridLine(wz, panel, 0.042)).mul(detail);
+    const joints = max(
+      gridLine(swX, acrossPeriod, jointHalf),
+      gridLine(swZ, alongPeriod, jointHalf)
+    ).mul(detail);
 
-    // Post-rain damp patches, pools & the overall wet film darken the flags
     const baseConcrete = mix(cConcreteB, cConcreteA, tone)
-      .mul(panelHash.sub(0.5).mul(0.16).add(1.0))
+      .mul(panelHash.sub(0.5).mul(0.12).add(1.0))
       .add(grit)
       .mul(mix(float(1.0), float(0.72), max(swWet.x, swPuddle)))
       .mul(mix(float(1.0), float(0.8), swWet.z));
 
-    return baseConcrete.mul(float(1.0).sub(joints.mul(0.45)));
+    return baseConcrete.mul(float(1.0).sub(joints.mul(0.22)));
   })();
 
   mat.roughnessNode = Fn(() => {
-    const panelHash = hash2D(floor(vec2(positionWorld.x.div(1.5), positionWorld.z.div(1.5))));
+    const panelHash = hash2D(floor(vec2(swX.div(acrossPeriod), swZ.div(alongPeriod))));
     const wetRough = mix(float(0.90).sub(panelHash.mul(0.06)), float(0.55), max(swWet.z, swWet.x.mul(0.7)));
     return mix(wetRough, float(0.2), swPuddle);
   })();
 
-  // Water's Fresnel (F0 = 0.02) on pools & the wet film, as for the roadway
   mat.metalnessNode = clamp(swFresnel.mul(1.6), 0.0, 0.85).mul(max(swPuddle, swWet.z.mul(0.3)));
 
-  // Physical -12mm scored expansion joints + +3mm concrete aggregate grain via bumpNormal
   mat.normalNode = Fn(() => {
-    const wx = positionWorld.x;
-    const wz = positionWorld.z;
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(140.0, 14.0, camDist);
 
-    const joints = max(gridLine(wx, 1.5, 0.042), gridLine(wz, 1.5, 0.042));
-    const grain = noise2D(vec2(wx.mul(4.5), wz.mul(4.5))).sub(0.5).mul(0.003);
-    const height = grain.sub(joints.mul(0.012)).mul(detail).mul(float(1.0).sub(swPuddle));
+    const joints = max(
+      gridLine(swX, acrossPeriod, jointHalf),
+      gridLine(swZ, alongPeriod, jointHalf)
+    );
+    const grain = noise2D(vec2(swX.mul(4.5), swZ.mul(4.5))).sub(0.5).mul(0.003);
+    const height = grain.sub(joints.mul(0.008)).mul(detail).mul(float(1.0).sub(swPuddle));
     return bumpNormal(height);
   })();
 
@@ -1391,9 +1401,8 @@ function createSidewalkMaterial() {
 }
 
 /**
- * NYC Dressed Granite Curbstone TSL Material (ported from SidewalkGenerator.js `createCurbMaterial`)
- * Dense cool grey flamed granite with 1.5m segment joints, grimier road-facing vertical face,
- * and `bumpNormal` granite grain.
+ * Granite kerb. Stones run along the ribbon (hkSpan length), about 0.9 m.
+ * The vertical face is darker than the top so the upstand reads at eye height.
  */
 function createCurbMaterial() {
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1401,33 +1410,35 @@ function createCurbMaterial() {
     roughness: 0.72
   });
 
+  const span = attribute('hkSpan', 'vec2');
+  const onRibbon = step(float(0.2), span.y);
+  const curbX = mix(positionWorld.x, positionGeometry.x.mul(span.x), onRibbon);
+  const curbZ = mix(positionWorld.z, positionGeometry.z.mul(span.y), onRibbon);
+
   mat.aoNode = canyonSkyAONode();
 
   mat.colorNode = Fn(() => {
-    const wx = positionWorld.x;
-    const wz = positionWorld.z;
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(180.0, 16.0, camDist);
 
-    const tone = noise2D(vec2(wx.mul(0.6), wz.mul(0.6)));
-    const speckle = noise2D(vec2(wx.mul(18.0), wz.mul(18.0))).sub(0.5).mul(0.06).mul(detail);
+    const tone = noise2D(vec2(curbX.mul(1.4), curbZ.mul(0.6)));
+    const speckle = noise2D(vec2(curbX.mul(18.0), curbZ.mul(18.0))).sub(0.5).mul(0.06).mul(detail);
     const stone = mix(color(0x4c4c45), color(0x63635a), tone).add(speckle);
 
-    const joints = max(gridLine(wx, 1.5, 0.038), gridLine(wz, 1.5, 0.038)).mul(detail);
+    const joints = gridLine(curbZ, 0.9, 0.008).mul(detail);
     const topFace = smoothstep(0.5, 0.85, normalWorldGeometry.y);
-    const wetFilm = smoothstep(0.2, 0.8, cityUniforms.uRoadWetness); // rain-darkened granite, like the roadway's film
-    return mix(stone.mul(0.68), stone, topFace).mul(float(1.0).sub(joints.mul(0.42))).mul(mix(float(1.0), float(0.78), wetFilm));
+    const wetFilm = smoothstep(0.2, 0.8, cityUniforms.uRoadWetness);
+    return mix(stone.mul(0.52), stone, topFace).mul(float(1.0).sub(joints.mul(0.5))).mul(mix(float(1.0), float(0.78), wetFilm));
   })();
 
   mat.roughnessNode = mix(float(0.72), float(0.5), smoothstep(0.2, 0.8, cityUniforms.uRoadWetness));
 
   mat.normalNode = Fn(() => {
-    const wx = positionWorld.x;
-    const wz = positionWorld.z;
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(120.0, 12.0, camDist);
-    const grain = noise2D(vec2(wx.mul(5.5), wz.mul(5.5))).sub(0.5).mul(0.0022);
-    return bumpNormal(grain.mul(detail));
+    const joints = gridLine(curbZ, 0.9, 0.008);
+    const grain = noise2D(vec2(curbX.mul(5.5), curbZ.mul(5.5))).sub(0.5).mul(0.0022);
+    return bumpNormal(grain.sub(joints.mul(0.004)).mul(detail));
   })();
 
   return mat;

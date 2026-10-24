@@ -14,6 +14,8 @@ import {
   gltfStreetPhoto,
   gltfTextureMaxEdge,
   hiddenExtrudeIds,
+  isLandsdNullTexel,
+  landsdNullFillTriangles,
   hk80GridToHk80Geog,
   hk80GridToWgs84,
   hk80ToWorld,
@@ -202,6 +204,33 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.doesNotMatch(gltfJs, /\.bias\(/);
   assert.doesNotMatch(gltfJs, /colorNode/);
   assert.doesNotMatch(gltfJs, /limitPhoto\(mat\.map\)/);
+  assert.match(gltfJs, /landsdNullFillTriangles/);
+});
+
+test('LandsD null-fill triangles drop and a photographed corner stays', () => {
+  assert.equal(isLandsdNullTexel(136, 138, 137), true);
+  assert.equal(isLandsdNullTexel(140, 140, 140), true);
+  assert.equal(isLandsdNullTexel(128, 128, 128), true);
+  assert.equal(isLandsdNullTexel(0, 0, 0), true);
+  assert.equal(isLandsdNullTexel(90, 82, 64), false);
+  assert.equal(isLandsdNullTexel(180, 170, 160), false);
+  const colors = [
+    [136, 138, 137],
+    [136, 138, 137],
+    [137, 138, 136],
+    [80, 90, 70],
+    [136, 138, 137],
+    [40, 50, 60]
+  ];
+  const dropped = landsdNullFillTriangles([0, 1, 2, 3, 4, 5], (i) => colors[i]);
+  assert.equal(dropped.dropped, 1);
+  assert.deepEqual(dropped.index, [3, 4, 5]);
+  const kept = landsdNullFillTriangles([0, 1, 2], () => null);
+  assert.equal(kept.dropped, 0);
+  assert.deepEqual(kept.index, [0, 1, 2]);
+  const photo = landsdNullFillTriangles([0, 1, 2], (i) => colors[i + 3]);
+  assert.equal(photo.dropped, 0);
+  assert.deepEqual(photo.index, [0, 1, 2]);
 });
 
 test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses do not', () => {

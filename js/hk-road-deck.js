@@ -5,6 +5,9 @@
 // and only the outer curb and the wider carriageway's paint are kept.
 
 export const HK_CURB_W = 0.42;
+// Granite upstand. Narrower than HK_CURB_W, which stays the canyon margin.
+// The rest of that 0.42 m is sidewalk, meeting the back of this stone.
+export const HK_KERB_STONE = 0.18;
 // Narrow walk. The building face sits on the outer edge of this, not a setback.
 export const HK_WALK_W = 2.05;
 const CURB_W = HK_CURB_W;
@@ -289,11 +292,12 @@ export function planHkRoadDeck(roads, coreBox) {
     });
     const walkExtend = seg.core ? Math.min(seg.width * 0.12, 1.6) : Math.min(seg.width * 0.2, 2.2);
     for (const sign of [1, -1]) {
-      const walk = sidePose(seg, sign, WALK_W, CURB_W + WALK_W * 0.5, walkExtend);
+      const walkW = WALK_W + (CURB_W - HK_KERB_STONE);
+      const walk = sidePose(seg, sign, walkW, HK_KERB_STONE + walkW * 0.5, walkExtend);
       if (seg.core && coveredByAsphalt(walk.x, walk.z, cover)) continue;
       sidewalks.push(walk);
       if (!seg.core || seg.len < 2) continue;
-      const curb = sidePose(seg, sign, CURB_W, CURB_W * 0.5, -1.4);
+      const curb = sidePose(seg, sign, HK_KERB_STONE, HK_KERB_STONE * 0.5, -1.4);
       if (curb.len < 0.8) continue;
       if (coveredByAsphalt(curb.x, curb.z, cover)) continue;
       curbs.push(curb);

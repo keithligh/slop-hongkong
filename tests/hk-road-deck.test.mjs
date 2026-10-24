@@ -4,6 +4,9 @@ import { HK_CORE_WORLD, ROADS } from '../js/city-config.js';
 import {
   carriagewayWidth,
   expandDashes,
+  HK_CURB_W,
+  HK_KERB_STONE,
+  HK_WALK_W,
   isTwoWay,
   markingLayout,
   markingPose,
@@ -105,6 +108,7 @@ test('parallel centrelines share one painted corridor and keep the outer curb', 
   assert.ok(curbs.some((s) => s.x < -4));
   assert.ok(curbs.some((s) => s.x > 7));
 
+  assert.ok(curbs.every((s) => s.w === HK_KERB_STONE));
   assert.equal(deck.markings.filter((m) => m.x > 400).length, 0);
   assert.ok(deck.asphalt.some((s) => s.name === 'FAR' && s.w >= 11));
   assert.ok(deck.markings.some((m) => m.role === 'stop'));
@@ -138,4 +142,23 @@ test('committed Des Voeux Central is an asphalt corridor with paint and a curb',
   const cz = (c0.z + c1.z) / 2;
   const yellow = deck.markings.filter((s) => s.color === 'yellow' && Math.hypot(s.x - cx, s.z - cz) < 24);
   assert.ok(yellow.length >= 1);
+});
+
+test('the kerb stone is narrower than the canyon margin and the walk keeps the outer edge', () => {
+  assert.equal(HK_KERB_STONE, 0.18);
+  assert.ok(HK_KERB_STONE < HK_CURB_W);
+  const deck = planHkRoadDeck([
+    { name: 'DES VOEUX', w: 10, lanes: 3, dir: 'FT', highway: false, pts: [{ x: 0, z: 0 }, { x: 0, z: 40 }] }
+  ], { minX: -80, maxX: 80, minZ: -80, maxZ: 80 });
+  const curb = deck.curbs.find((s) => s.x < 0 && s.z > 5 && s.z < 35);
+  const walk = deck.sidewalks.find((s) => s.x < 0 && s.z > 5 && s.z < 35);
+  assert.ok(curb);
+  assert.ok(walk);
+  const half = 5;
+  assert.equal(curb.w, HK_KERB_STONE);
+  assert.ok(Math.abs(Math.abs(curb.x) - (half + HK_KERB_STONE * 0.5)) < 1e-6);
+  const outer = Math.abs(walk.x) + walk.w * 0.5;
+  const inner = Math.abs(walk.x) - walk.w * 0.5;
+  assert.ok(Math.abs(outer - (half + HK_CURB_W + HK_WALK_W)) < 1e-6);
+  assert.ok(Math.abs(inner - (half + HK_KERB_STONE)) < 1e-6);
 });

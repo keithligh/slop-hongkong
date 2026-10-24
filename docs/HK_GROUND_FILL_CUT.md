@@ -8,13 +8,13 @@ There is no flag. Boot does not need a fetch. Central only.
 
 `js/hk-ground-fill.js` plans one podium per side of each Central centreline. `js/city-grid.js` instances it with the same curtain-wall podium shader as the LandsD extrudes, bottom at y = 0.16, height 18 m. The taxi collides with those boxes, so driving off the carriageway meets a wall.
 
-- **Tagged width stays.** `carriagewayWidth` uses the LandsD/OSM tag when it is at least 3.2 m. A 3 m / 1 lane street is 3.6 m, a 5 m street stays 5 m, a 7 m street stays 7 m. Only a missing or hairline tag gets a class floor, and a highway tag still cannot collapse below 10.5 m. The sidewalk is 2.05 m (`HK_WALK_W`), outside a 0.42 m curb.
+- **Tagged width stays.** `carriagewayWidth` uses the LandsD/OSM tag when it is at least 3.2 m. A 3 m / 1 lane street is 3.6 m, a 5 m street stays 5 m, a 7 m street stays 7 m. Only a missing or hairline tag gets a class floor, and a highway tag still cannot collapse below 10.5 m. The wall still stands outside `HK_WALK_W` (2.05 m) plus `HK_CURB_W` (0.42 m). The drawn stone is 0.18 m; the section is in [HK_ROADS_CUT.md](HK_ROADS_CUT.md).
 - **Footprint within about 18 m of the sidewalk.** The podium depth is that gap, plus a short bite into the footprint so the seam does not show the coast plate. A footprint already on the sidewalk is left alone.
 - **No footprint on that side.** A 12 m street wall stands on the outer edge of the sidewalk. From the carriageway the next surface is the wall, not a plaza.
 - **Harbour.** A wall is kept only when its centre and its outer face are inside the Hong Kong Island ring. The water side of the shore, and the north edge of the Central box that is already harbour, stay water.
 - **Other carriageways.** A wall that would land in a parallel or crossing deck is dropped or shortened, so junctions stay open and two parts of Des Voeux do not grow a building in the asphalt.
 
-The asphalt deck, curb, lane paint, and `planHkRoadDeck` graph are otherwise unchanged. The 2D atlas is unchanged. Outside Central there is no street wall.
+The canyon plan still uses that 0.42 m margin. The drawn kerb, sidewalk joints, and OSM seating are in [HK_ROADS_CUT.md](HK_ROADS_CUT.md). The 2D atlas is unchanged. Outside Central there is no street wall.
 
 ## How to verify
 

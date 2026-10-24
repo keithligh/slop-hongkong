@@ -287,13 +287,49 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// Chase atlases are one mip, sampled with a linear filter and no anisotropy.
-// The Henderson charts are 4096 photographs. A generated mip chain, and a
-// mipmapped min-filter on a chain that was never uploaded, both leave level 0
-// on a street-height wall: the podium flattens to the atlas's light fill and
-// the missing facade charts come back as brown patches. Anisotropy is what
-// steps that wall onto the bad level, so the chase sampler does not ask for it.
-// Off-look masses still keep a real mip chain and anisotropy 16.
+// Chase atlases stay one mip, sampled with a linear filter and no anisotropy.
+// A generated mip chain on these 4096 charts smears a street-height wall, so
+// the chase sampler still does not ask for one. That sampler is not what paints
+// the blank podium. LandsD leaves large triangles on a constant atlas fill
+// (about 136,138,137, also 128,128,128 and black). Those triangles are omitted
+// so the same mesh's photographic charts remain. Off-look masses still keep a
+// real mip chain and anisotropy 16.
+
+// LandsD atlas padding. A texel this flat is not a facade photograph.
+export function isLandsdNullTexel(r, g, b) {
+  if (r <= 3 && g <= 3 && b <= 3) return true;
+  if (Math.abs(r - 128) <= 2 && Math.abs(g - 128) <= 2 && Math.abs(b - 128) <= 2) return true;
+  if (Math.abs(r - 136) <= 4 && Math.abs(g - 138) <= 4 && Math.abs(b - 137) <= 4) return true;
+  return false;
+}
+
+// Drop a triangle only when every corner samples that fill. A photographed
+// corner stays, and a missing sample stays (the mesh is not deleted).
+export function landsdNullFillTriangles(index, sampleVertex) {
+  const kept = [];
+  let dropped = 0;
+  const src = index || [];
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ca = sampleVertex(a);
+    const cb = sampleVertex(b);
+    const cc = sampleVertex(c);
+    if (
+      ca && cb && cc
+      && isLandsdNullTexel(ca[0], ca[1], ca[2])
+      && isLandsdNullTexel(cb[0], cb[1], cb[2])
+      && isLandsdNullTexel(cc[0], cc[1], cc[2])
+    ) {
+      dropped++;
+      continue;
+    }
+    kept.push(a, b, c);
+  }
+  return { index: kept, dropped };
+}
+
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
   if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 1, minFilter: 'linear' };

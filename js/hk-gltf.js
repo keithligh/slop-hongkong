@@ -6,6 +6,7 @@ import {
   gltfAlbedoSampler,
   hiddenExtrudeIds,
   hk80ToWorld,
+  landsdNullFillTriangles,
   planGltfManifest,
   resolveHkGltfRequest
 } from './hk-gltf-frame.js';
@@ -76,6 +77,95 @@ function limitPhoto(tex, maxEdge) {
 }
 
 const PHOTO_MAPS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'];
+const NULL_FILL_EDGE = 256;
+
+function albedoMap(material) {
+  const list = Array.isArray(material) ? material : [material];
+  for (const mat of list) {
+    if (mat?.map?.image) return mat.map;
+  }
+  return null;
+}
+
+// glTF v = 0 is the bottom of the chart. Canvas y = 0 is the top, and LandsD
+// textures are uploaded with flipY false, so the sample flips v.
+function nullFillSheet(tex) {
+  if (tex.userData?.hkNullFill) return tex.userData.hkNullFill;
+  if (tex.userData?.hkNullFillFailed) return null;
+  const img = tex.image;
+  const w0 = img?.width || 0;
+  const h0 = img?.height || 0;
+  if (!w0 || !h0 || typeof document === 'undefined') {
+    if (tex.userData) tex.userData.hkNullFillFailed = true;
+    return null;
+  }
+  const scale = Math.min(1, NULL_FILL_EDGE / Math.max(w0, h0));
+  const w = Math.max(1, Math.round(w0 * scale));
+  const h = Math.max(1, Math.round(h0 * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    tex.userData.hkNullFillFailed = true;
+    return null;
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch {
+    tex.userData.hkNullFillFailed = true;
+    return null;
+  }
+  const sheet = { w, h, data };
+  tex.userData.hkNullFill = sheet;
+  return sheet;
+}
+
+function sampleAlbedoTexel(tex, u, v) {
+  const sheet = nullFillSheet(tex);
+  if (!sheet) return null;
+  let uu = u % 1;
+  let vv = v % 1;
+  if (uu < 0) uu += 1;
+  if (vv < 0) vv += 1;
+  const x = Math.min(sheet.w - 1, (uu * sheet.w) | 0);
+  const y = Math.min(sheet.h - 1, ((1 - vv) * sheet.h) | 0);
+  const i = (y * sheet.w + x) * 4;
+  return [sheet.data[i], sheet.data[i + 1], sheet.data[i + 2]];
+}
+
+function triangleIndex(geo) {
+  const index = geo.getIndex();
+  if (index) return index.array;
+  const n = geo.getAttribute('position').count;
+  const out = new Uint32Array(n);
+  for (let i = 0; i < n; i++) out[i] = i;
+  return out;
+}
+
+// Street-height triangles whose three corners all sit on LandsD null fill are
+// omitted. The building and its photographic charts stay. A triangle that
+// cannot be sampled stays too.
+function omitLandsdNullFill(geo, material) {
+  const map = albedoMap(material);
+  const uv = geo.getAttribute('uv');
+  if (!map || !uv) return 0;
+  const src = triangleIndex(geo);
+  const { index, dropped } = landsdNullFillTriangles(src, (vertex) => {
+    if (vertex < 0 || vertex >= uv.count) return null;
+    return sampleAlbedoTexel(map, uv.getX(vertex), uv.getY(vertex));
+  });
+  if (!dropped) return 0;
+  if (!index.length) {
+    geo.setDrawRange(0, 0);
+    return dropped;
+  }
+  geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(index), 1));
+  geo.clearGroups();
+  return dropped;
+}
 
 // The glTF material keeps its baseColor texture, UV set, and alpha. This only
 // corrects the sampler and the constant FME metal factor.
@@ -187,10 +277,16 @@ export async function mountHkGltfBuildings(scene, plan) {
       const gltf = await loader.loadAsync(entry.url);
       gltf.scene.updateMatrixWorld(true);
       let meshes = 0;
+      let nullDropped = 0;
       gltf.scene.traverse((obj) => {
         if (!obj.isMesh) return;
         const geo = bakeMesh(obj);
         if (!geo) return;
+        nullDropped += omitLandsdNullFill(geo, obj.material);
+        if (geo.drawRange.count === 0) {
+          geo.dispose();
+          return;
+        }
         sharpenPhoto(obj.material, gltfAlbedoSampler(entry));
         const mesh = new THREE.Mesh(geo, obj.material);
         mesh.name = 'HkGltfBuilding';
@@ -199,6 +295,7 @@ export async function mountHkGltfBuildings(scene, plan) {
         group.add(mesh);
         meshes++;
       });
+      if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
       if (!meshes) throw new Error('no meshes');
       colliders.push({
         minX: entry.minX,
