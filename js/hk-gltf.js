@@ -11,6 +11,7 @@ import {
   planGltfManifest,
   resolveHkGltfRequest
 } from './hk-gltf-frame.js';
+import { filterDigit1ProbeBuildings, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
 
 // LandsD individualised sheets for Central street faces. A missing manifest leaves the extrudes.
 // GLTFLoader is a static import. index.html pins that one addon file: the jsDelivr
@@ -79,6 +80,12 @@ function limitPhoto(tex, maxEdge) {
 
 const PHOTO_MAPS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'];
 const NULL_FILL_EDGE = 256;
+
+function buildingIdOf(entry) {
+  if (entry?.name && /[A-Z]\d{6,}/i.test(entry.name)) return entry.name;
+  const match = String(entry?.file || '').match(/([A-Z]\d{6,}[A-Z0-9]*)\.gltf/i);
+  return match ? match[1] : (entry?.name || '');
+}
 
 function albedoMap(material) {
   const list = Array.isArray(material) ? material : [material];
@@ -253,6 +260,12 @@ export async function prepareHkGltfSheet(href) {
     reason: reasons.join(' | '),
     buildings
   }, { cap: request.cap });
+  const probe = parseDigit1ProbeRequest(href).enabled;
+  if (probe) {
+    plan.selected = filterDigit1ProbeBuildings(plan.selected, true);
+    plan.reason = `${plan.reason ? `${plan.reason} ` : ''}Digit1 probe mounts ${plan.selected.length} ray buildings so the frame can present.`;
+    console.info(`[gltf] digit1 probe buildings ${plan.selected.map((entry) => entry.name || entry.file).join(' ')}`);
+  }
   const hidden = hiddenExtrudeIds(BLOCKS, plan.selected);
   return {
     ...plan,
@@ -284,7 +297,8 @@ export async function mountHkGltfBuildings(scene, plan) {
         if (!obj.isMesh) return;
         const geo = bakeMesh(obj);
         if (!geo) return;
-        nullDropped += omitLandsdNullFill(geo, obj.material);
+        const dropped = omitLandsdNullFill(geo, obj.material);
+        nullDropped += dropped;
         if (geo.drawRange.count === 0) {
           geo.dispose();
           return;
@@ -294,6 +308,11 @@ export async function mountHkGltfBuildings(scene, plan) {
         mesh.name = 'HkGltfBuilding';
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        mesh.userData.hkBuildingId = buildingIdOf(entry);
+        mesh.userData.hkFile = entry.file || '';
+        mesh.userData.hkSheet = entry.sheet || '';
+        mesh.userData.hkSource = 'landsd';
+        mesh.userData.hkNullDropped = dropped;
         group.add(mesh);
         meshes++;
       });

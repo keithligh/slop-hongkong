@@ -3,4 +3,7 @@
 tools/data/hk/landsd-*.geojson
 tools/data/hk/osm_*.json
 # LandsD individualised glTF sheets from tools/fetch-central-gltf-sheet.mjs (~35–110 MB).
+# Digit1 probe captures. Rerun with node tools/digit1-pixel-probe.mjs.
+tools/digit1-pixel-probe.json
+tools/digit1-pixel-probe*.png
 hk-3d/

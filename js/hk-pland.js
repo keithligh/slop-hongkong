@@ -132,6 +132,9 @@ export async function mountPlandCorridor(scene, plan) {
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
         mesh.name = 'HkPlandMesh';
+        mesh.userData.hkSource = 'pland';
+        mesh.userData.hkBuildingId = tile.grid || '';
+        mesh.userData.hkFile = tile.gltf || '';
         mesh.castShadow = false;
         mesh.receiveShadow = false;
         mesh.renderOrder = donor ? -1 : 0;

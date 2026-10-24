@@ -9,6 +9,8 @@ import { buildBoroughs } from './boroughs.js';
 import { buildLandmarks } from './landmarks.js';
 import { buildCityBlocks } from './buildings.js';
 import { mountHkGltfBuildings, prepareHkGltfSheet } from './hk-gltf.js';
+import { DIGIT1_PROBE_SAMPLES, isPaleRgb, ndcToReadPixel, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
+import { runDigit1Probe } from './digit1-probe.js';
 import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
 import { buildStreetDetails } from './street-details.js';
 import { createTrafficSystem, createHighwayTraffic } from './traffic.js';
@@ -65,6 +67,16 @@ async function initApp() {
 
   await renderer.init();
   markInit('renderer');
+  if (new URL(window.location.href).searchParams.get('probe') === 'digit1') {
+    const device = renderer.backend?.device;
+    const limits = device?.limits;
+    if (limits) {
+      console.info(`[digit1-probe] limits maxBuffer ${limits.maxBufferSize} maxTex ${limits.maxTextureDimension2D}`);
+    }
+    device?.lost?.then((info) => {
+      console.error(`[digit1-probe] device lost ${info?.reason || ''} ${info?.message || ''}`);
+    });
+  }
 
   // 2. Build Scene & Physical Atmospheric Sky / PMREM IBL / 4096x4096 Shadow Lighting
   const scene = new THREE.Scene();
@@ -134,6 +146,8 @@ async function initApp() {
 
   // Street proof is the person chase at eye height. A flyover frame is not acceptance.
   // index.html?at=-1.4,29.3,1.29 stands on Des Voeux looking east.
+  // ?probe=digit1 reads those pixels back to the mesh that drew them.
+  const digit1ProbeRequest = parseDigit1ProbeRequest(window.location.href);
   try {
     const at = new URL(window.location.href).searchParams.get('at');
     if (at) {
@@ -594,7 +608,10 @@ async function initApp() {
   //     leaves the main thread idle about half the time while nothing else animates; several calls side by side keep
   //     it busy (warm cache: 2.1 s instead of 4.0 s). (Rendering straight away compiled ~500 pipelines one after
   //     another: ~25 s with a cold shader cache.)
-  const COMPILE_POOL = 16;
+  // Sixteen overlapping compileAsync calls drop the SwiftShader device on the
+  // Digit1 probe (instance lost, then every createBuffer fails). One at a time
+  // still compiles the same pipelines.
+  const COMPILE_POOL = digit1ProbeRequest.enabled ? 1 : 16;
   const nextTask = () => (globalThis.scheduler?.yield ? globalThis.scheduler.yield() : new Promise((resolve) => setTimeout(resolve, 0)));
   async function precompileShaders() {
     // An empty frame first: it sets up the post-processing chain, which configures the scene pass's render target
@@ -673,6 +690,8 @@ async function initApp() {
   let fpsTimer = 0;
   let nextPlayerSave = 0;
   let warmedUp = false; // see the first frame below
+  let digit1ProbeStarted = false;
+  let digit1SettleAt = 0;
 
   if (elFps) elFps.textContent = '60';
 
@@ -767,6 +786,81 @@ async function initApp() {
       // The street corner of the player on the follow cameras, of the camera itself on the scenic ones
       const where = cameraSystem.getActivePreset().category === 'follow' ? activeEnt.position : cameraSystem.currentPos;
       renderLocation(getLocationLabel(where.x, where.z));
+    }
+
+    if (digit1ProbeRequest.enabled && warmedUp && !digit1ProbeStarted) {
+      const overlayGone = !loadingOverlay || loadingOverlay.classList.contains('hidden');
+      // The hide class starts a 0.6s fade. SwiftShader can take seconds per
+      // frame, so this is wall time, not a frame count.
+      if (!overlayGone) {
+        // keep drawing
+      } else if (!digit1SettleAt) {
+        digit1SettleAt = performance.now();
+      } else if (performance.now() - digit1SettleAt < 800) {
+        // keep drawing through the fade
+      } else {
+      digit1ProbeStarted = true;
+      const entity = controllerManager.getActiveEntity();
+      const src = renderer.domElement;
+      try {
+        const snap = document.createElement('canvas');
+        snap.width = src.width;
+        snap.height = src.height;
+        const ctx = snap.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(src, 0, 0);
+        const data = ctx.getImageData(0, 0, snap.width, snap.height).data;
+        window.__digit1LiveRgb = DIGIT1_PROBE_SAMPLES.map(([ndcX, ndcY]) => {
+          const pixel = ndcToReadPixel(ndcX, ndcY, snap.width, snap.height, 'top');
+          const i = (pixel.y * snap.width + pixel.x) * 4;
+          const rgb = [data[i], data[i + 1], data[i + 2]];
+          return { ndc: [ndcX, ndcY], pixel, rgb, pale: isPaleRgb(rgb) };
+        });
+      } catch (err) {
+        window.__digit1LiveRgb = [];
+        console.warn('[digit1-probe] live canvas', err?.message || err);
+      }
+      // Leave the loop running until the harness has snapped the presented
+      // frame. Stopping it first, then building an id material per mesh,
+      // drops the SwiftShader device before any pixel can be read.
+      window.__digit1Stage = 'live';
+      queueMicrotask(() => {
+        const deadline = performance.now() + 20000;
+        const waitForShot = () => new Promise((resolve) => {
+          const tick = () => {
+            if (window.__digit1Shot === 'live' || performance.now() > deadline) resolve();
+            else setTimeout(tick, 30);
+          };
+          tick();
+        });
+        waitForShot().then(() => {
+        renderer.setAnimationLoop(null);
+        if (window.__digit1BootErrors?.length) {
+          console.info('[digit1-probe] boot', window.__digit1BootErrors.slice(0, 8).join(' | '));
+        }
+        runDigit1Probe({
+          renderer,
+          scene,
+          camera: cameraSystem.camera,
+          cameraSystem,
+          entity,
+          sky: lightingSystem.sky,
+          renderPipeline,
+          requestedAt: digit1ProbeRequest.at,
+          groundAt: (x, z) => controllerManager.getGroundHeight(x, z, 'person')
+        }).then((report) => {
+          window.__digit1Probe = report;
+          console.info(`[digit1-probe] ${report.premise} ${report.painter}`);
+        }).catch((err) => {
+          window.__digit1Probe = {
+            premise: 'INCONCLUSIVE',
+            painter: '',
+            reason: String(err && err.stack ? err.stack : err)
+          };
+          console.error('[digit1-probe]', err);
+        });
+        });
+      });
+      }
     }
   });
 }
