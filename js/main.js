@@ -8,7 +8,7 @@ import { buildCityGrid } from './city-grid.js';
 import { buildBoroughs } from './boroughs.js';
 import { buildLandmarks } from './landmarks.js';
 import { buildCityBlocks } from './buildings.js';
-import { mountHkGltfBuildings, prepareHkGltfSheet } from './hk-gltf.js';
+import { mountHkGltfBuildings, prepareHkGltfSheet, setLandsdAnisotropyLimit } from './hk-gltf.js';
 import { DIGIT1_PROBE_SAMPLES, isPaleRgb, ndcToReadPixel, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
 import { runDigit1Probe } from './digit1-probe.js';
 import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
@@ -67,6 +67,12 @@ async function initApp() {
 
   await renderer.init();
   markInit('renderer');
+  // Chrome 156 accepts sampler maxAnisotropy 16 but leaves the device limit
+  // undefined. An explicit 1 (or ?landsdAniso=1) keeps the one-tap chase sample.
+  const maxAniso = renderer.backend?.device?.limits?.maxSamplerAnisotropy;
+  if (maxAniso) setLandsdAnisotropyLimit(maxAniso);
+  const anisoQuery = new URL(window.location.href).searchParams.get('landsdAniso');
+  if (anisoQuery && Number.isFinite(Number(anisoQuery))) setLandsdAnisotropyLimit(Number(anisoQuery));
   if (new URL(window.location.href).searchParams.get('probe') === 'digit1') {
     const device = renderer.backend?.device;
     const limits = device?.limits;

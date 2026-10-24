@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Near facade sampler bench</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/build/three.webgpu.js",
+        "three/webgpu": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/build/three.webgpu.js",
+        "three/tsl": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/build/three.tsl.js",
+        "three/addons/": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@dev/examples/jsm/",
+        "three/addons/loaders/GLTFLoader.js": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@5e6eee6ce8757abde7105aba35a358feac986e91/examples/jsm/loaders/GLTFLoader.js"
+      }
+    }
+  </script>
+</head>
+<body style="margin:0;background:#000">
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { gltfAlbedoSampler } from '../js/hk-gltf-frame.js';
+import { setLandsdAnisotropyLimit, sharpenPhoto } from '../js/hk-gltf.js';
+
+const params = new URLSearchParams(location.search);
+const mode = params.get('mode') || 'near';
+
+function chart() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgb(136,138,137)';
+  ctx.fillRect(0, 0, 512, 512);
+  const x0 = 48;
+  const y0 = 48;
+  const x1 = 464;
+  const y1 = 464;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const u = x - x0;
+      const bay = u % 32;
+      let r = 70;
+      let g = 64;
+      let b = 58;
+      if (bay < 10) {
+        r = 22; g = 18; b = 16;
+      } else if (bay < 16) {
+        const stroke = (u % 2) === 0;
+        r = stroke ? 18 : 230;
+        g = stroke ? 16 : 186;
+        b = stroke ? 12 : 48;
+      } else if (bay < 22) {
+        r = 168; g = 54; b = 46;
+      } else if (((u % 8) < 1) || (((y - y0) % 18) < 1)) {
+        r = 210; g = 206; b = 198;
+      } else {
+        r = 46; g = 62; b = 78;
+      }
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  return canvas;
+}
+
+const renderer = new THREE.WebGPURenderer({ antialias: true });
+renderer.setPixelRatio(1);
+renderer.setSize(960, 540);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+
+await renderer.init();
+const reported = renderer.backend?.device?.limits?.maxSamplerAnisotropy;
+// This Chrome build accepts maxAnisotropy on the sampler but does not expose
+// the limit on the device. Missing means the sampler can still take 16.
+const limit = reported > 1 ? reported : 16;
+setLandsdAnisotropyLimit(limit);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2a3544);
+const camera = new THREE.PerspectiveCamera(48, 960 / 540, 0.05, 80);
+camera.position.set(1.15, 1.7, 1.2);
+camera.lookAt(1.15, 2.4, 16);
+
+const source = chart();
+const tex = new THREE.CanvasTexture(source);
+tex.colorSpace = THREE.SRGBColorSpace;
+tex.flipY = false;
+tex.wrapS = THREE.ClampToEdgeWrapping;
+tex.wrapT = THREE.ClampToEdgeWrapping;
+
+const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+if (mode === 'linear') {
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = 1;
+  tex.needsUpdate = true;
+} else if (mode === 'full') {
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.anisotropy = Math.min(16, limit);
+  tex.needsUpdate = true;
+} else {
+  const sampler = gltfAlbedoSampler({ minX: -8, maxX: 8, minZ: 20, maxZ: 40 });
+  sharpenPhoto(mat, sampler);
+}
+
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(28, 9), mat);
+wall.geometry.rotateY(Math.PI / 2);
+wall.position.set(0, 4.5, 15);
+scene.add(wall);
+
+mat.side = THREE.DoubleSide;
+await renderer.render(scene, camera);
+await renderer.backend.device.queue.onSubmittedWorkDone();
+window.__benchReady = {
+  mode,
+  limit,
+  anisotropy: tex.anisotropy,
+  minFilter: tex.minFilter,
+  mipmaps: tex.generateMipmaps,
+  levels: tex.mipmaps?.length || 0,
+  nearChain: !!tex.userData.hkNearChain
+};
+</script>
+</body>
+</html>

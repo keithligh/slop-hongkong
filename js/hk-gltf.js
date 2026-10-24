@@ -5,6 +5,7 @@ import {
   bakeGltfWorldTriangles,
   boxClosestDistance,
   formatGltfLog,
+  clampLandsdAnisotropy,
   gltfAlbedoSampler,
   gltfInStreetChase,
   hiddenExtrudeIds,
@@ -83,6 +84,57 @@ function limitPhoto(tex, maxEdge) {
 
 const PHOTO_MAPS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'];
 const NULL_FILL_EDGE = 256;
+
+// The device limit. Core WebGPU reports 16; an adapter that only allows 1 cannot
+// take the anisotropic taps, and a second mip without those taps only blurs.
+let anisotropyLimit = 16;
+
+export function setLandsdAnisotropyLimit(value) {
+  anisotropyLimit = clampLandsdAnisotropy(value, value);
+}
+
+// Level 0 is the JPEG. Level 1 is half resolution, so the GPU may filter
+// anisotropically and still cannot select the deep mips where atlas fill
+// smears a street-height chart. No second level is uploaded when the device
+// cannot do anisotropy.
+function uploadNearFacadeMips(tex, anisotropy) {
+  const aniso = clampLandsdAnisotropy(anisotropy, anisotropyLimit);
+  tex.userData.hkFullRes = true;
+  const img = tex.image;
+  const w = img?.width || 0;
+  const h = img?.height || 0;
+  if (tex.userData.hkNearChain) {
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearMipmapLinearFilter;
+    tex.anisotropy = aniso;
+    return;
+  }
+  // A second mip without anisotropic taps is only a blur. Keep the one-tap sample.
+  if (aniso < 2 || !(w >= 2 && h >= 2) || typeof document === 'undefined') {
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.anisotropy = 1;
+    return;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.floor(w / 2));
+  canvas.height = Math.max(1, Math.floor(h / 2));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    tex.generateMipmaps = false;
+    tex.minFilter = THREE.LinearFilter;
+    tex.anisotropy = 1;
+    return;
+  }
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  tex.mipmaps = [img, canvas];
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = aniso;
+  tex.userData.hkNearChain = true;
+}
 
 function buildingIdOf(entry) {
   if (entry?.name && /[A-Z]\d{6,}/i.test(entry.name)) return entry.name;
@@ -181,7 +233,7 @@ function omitLandsdNullFill(geo, material) {
 
 // The glTF material keeps its baseColor texture, UV set, and alpha. This only
 // corrects the sampler and the constant FME metal factor.
-function sharpenPhoto(material, sampler) {
+export function sharpenPhoto(material, sampler) {
   const list = Array.isArray(material) ? material : [material];
   for (const mat of list) {
     if (!mat) continue;
@@ -189,11 +241,13 @@ function sharpenPhoto(material, sampler) {
       const tex = mat[key];
       if (!tex?.isTexture) continue;
       if (key === 'map' || key === 'emissiveMap') tex.colorSpace = THREE.SRGBColorSpace;
-      if (sampler.mipmaps) {
+      if (sampler.mipLevels === 2) {
+        uploadNearFacadeMips(tex, sampler.anisotropy);
+      } else if (sampler.mipmaps) {
         if (!tex.userData.hkFullRes) limitPhoto(tex, sampler.maxEdge);
         tex.generateMipmaps = true;
         tex.minFilter = THREE.LinearMipmapLinearFilter;
-        tex.anisotropy = sampler.anisotropy;
+        tex.anisotropy = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
       } else {
         // One level. LinearMipmapLinearFilter on that level is the brown patch:
         // the GPU's anisotropic lookup steps off the 4096 chart into a mip that
@@ -201,7 +255,7 @@ function sharpenPhoto(material, sampler) {
         tex.userData.hkFullRes = true;
         tex.generateMipmaps = false;
         tex.minFilter = THREE.LinearFilter;
-        tex.anisotropy = sampler.anisotropy;
+        tex.anisotropy = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
       }
       tex.magFilter = THREE.LinearFilter;
       tex.needsUpdate = true;

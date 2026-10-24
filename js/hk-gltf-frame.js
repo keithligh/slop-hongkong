@@ -287,14 +287,22 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// Chase atlases stay one mip, sampled with a linear filter and no anisotropy.
-// A generated mip chain on these 4096 charts smears a street-height wall, so
-// the chase sampler still does not ask for one. That sampler is not what paints
-// the blank podium. LandsD leaves large triangles on a constant atlas fill
-// (about 136,138,137, also 128,128,128 and black). Those triangles are omitted
-// so the same mesh's photographic charts remain. The sample uses glTF v = 0 as
-// the first image row, the same row flipY false uploads. Off-look masses still
-// keep a real mip chain and anisotropy 16.
+// Within HK_STREET_NEAR (80 m) the facade is close enough for two levels:
+// the 4096 photograph and one half-res mip. Anisotropy is legal only when a
+// second level exists. A full generated chain still walks into LandsD atlas
+// fill at a street angle (the muddy mip), so the near sampler does not ask
+// for one. Past that disc, including The Henderson, the chase stays one mip
+// with a linear filter and no anisotropy: a mipmapped min-filter on a level
+// that was never uploaded is the brown patch, and anisotropy is what steps
+// onto it. Off-look masses still keep a real mip chain and anisotropy 16.
+// LandsD null-fill triangles stay omitted. The sample uses glTF v = 0 as the
+// first image row, the same row flipY false uploads.
+
+export function clampLandsdAnisotropy(requested, limit = 16) {
+  const cap = Number.isFinite(limit) && limit >= 1 ? Math.min(16, limit) : 16;
+  const ask = Number.isFinite(requested) ? requested : 1;
+  return Math.max(1, Math.min(Math.floor(ask), Math.floor(cap)));
+}
 
 // LandsD atlas padding. A texel this flat is not a facade photograph.
 export function isLandsdNullTexel(r, g, b) {
@@ -471,6 +479,11 @@ export function bakeGltfWorldTriangles(doc, buffers, sidewalk = ISLAND_BOUNDS.si
 
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
+  // The 80 m street disc, not the 120 m native-resolution disc. A second mip
+  // here is what makes anisotropy legal without a deep chain to smear.
+  if (maxEdge === 0 && boxClosestDistance(entry, eye) <= HK_STREET_NEAR) {
+    return { maxEdge: 0, mipmaps: true, mipLevels: 2, anisotropy: 16, minFilter: 'mipmap' };
+  }
   if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 1, minFilter: 'linear' };
   return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
 }

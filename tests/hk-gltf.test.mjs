@@ -10,6 +10,7 @@ import {
   chooseCentralSheet,
   formatGltfLog,
   bakeGltfWorldTriangles,
+  clampLandsdAnisotropy,
   gltfAlbedoSampler,
   gltfInStreetChase,
   gltfStreetPhoto,
@@ -202,7 +203,11 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.match(gltfJs, /generateMipmaps = false/);
   assert.match(gltfJs, /LinearFilter/);
   assert.match(gltfJs, /metalness = 0/);
-  assert.match(gltfJs, /anisotropy = sampler\.anisotropy/);
+  assert.match(gltfJs, /uploadNearFacadeMips/);
+  assert.match(gltfJs, /mipLevels === 2/);
+  assert.match(gltfJs, /clampLandsdAnisotropy\(sampler\.anisotropy/);
+  assert.match(main, /setLandsdAnisotropyLimit/);
+  assert.match(main, /landsdAniso/);
   assert.doesNotMatch(gltfJs, /\.bias\(/);
   assert.doesNotMatch(gltfJs, /colorNode/);
   assert.doesNotMatch(gltfJs, /limitPhoto\(mat\.map\)/);
@@ -247,7 +252,7 @@ test('LandsD null-fill triangles drop and a photographed corner stays', () => {
   assert.ok(landsdAlbedoRow(0.727, 4096) > 2048);
 });
 
-test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses do not', () => {
+test('Des Voeux near facades take two mips, and the chase past 80 m stays one mip', () => {
   const plan = planGltfManifest({
     sheet: '11-SW-9C',
     buildings: [
@@ -262,9 +267,27 @@ test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses 
   assert.equal(gltfTextureMaxEdge({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 }), 2048);
   const nearPhoto = gltfAlbedoSampler({ minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 });
   assert.equal(nearPhoto.maxEdge, 0);
-  assert.equal(nearPhoto.mipmaps, false);
-  assert.equal(nearPhoto.anisotropy, 1);
-  assert.equal(nearPhoto.minFilter, 'linear');
+  assert.equal(nearPhoto.mipmaps, true);
+  assert.equal(nearPhoto.mipLevels, 2);
+  assert.equal(nearPhoto.anisotropy, 16);
+  assert.equal(nearPhoto.minFilter, 'mipmap');
+  assert.equal(clampLandsdAnisotropy(16, 16), 16);
+  assert.equal(clampLandsdAnisotropy(16, 1), 1);
+  const fx = Math.sin(HK_STREET_EYE.heading);
+  const fz = Math.cos(HK_STREET_EYE.heading);
+  const pointBox = (dist) => {
+    const x = HK_STREET_EYE.x + dist * fx;
+    const z = HK_STREET_EYE.z + dist * fz;
+    return { minX: x, maxX: x, minZ: z, maxZ: z };
+  };
+  const at80 = gltfAlbedoSampler(pointBox(80));
+  assert.equal(at80.mipLevels, 2);
+  assert.equal(at80.anisotropy, 16);
+  const past80 = gltfAlbedoSampler(pointBox(96));
+  assert.equal(gltfInStreetChase(pointBox(96)), true);
+  assert.equal(past80.mipmaps, false);
+  assert.equal(past80.anisotropy, 1);
+  assert.equal(past80.minFilter, 'linear');
   const farPhoto = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
   assert.equal(farPhoto.maxEdge, 2048);
   assert.equal(farPhoto.mipmaps, true);
