@@ -62,6 +62,7 @@ import {
   ISLAND_BOUNDS,
   HK_RETAIL_BELT
 } from './city-config.js';
+import { HK_SHOP_BAY, HK_SHOP_BAYS, shopfrontImage } from './hk-shopfront.js';
 
 // js/tsl-materials.js
 // Photorealistic TSL (Three.js Shading Language) procedural shaders for Three.js r186 WebGPURenderer
@@ -1930,22 +1931,44 @@ function createCarFlareMaterial() {
   return mat;
 }
 
+// Two-storey shopfront atlas. The previous belt painted a shop only up to about
+// y = 4.7 and left the rest of HK_RETAIL_BELT as one stone colour with no map.
+// That stone is the Digit1 pale slab (about RGB 176, 168, 170 at NDC 0, −0.08).
+let _shopfrontMap = null;
+function shopfrontMap() {
+  if (_shopfrontMap) return _shopfrontMap;
+  const width = 128;
+  const height = 64;
+  const tex = new THREE.DataTexture(shopfrontImage(width, height, HK_RETAIL_BELT), width, height);
+  tex.name = 'hkShopfrontAlbedo';
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.flipY = false;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.anisotropy = 1;
+  tex.needsUpdate = true;
+  _shopfrontMap = tex;
+  return tex;
+}
+
 // Street podium shared by the retail belt, the massing podium, and the curtain-wall
-// backstop. Shop mouth sits above a granite plinth. Punched openings exist only
-// above HK_RETAIL_BELT, so a curtain grid cannot reach the pavement.
+// backstop. The atlas is a plinth, a dark shop mouth, and a sign band. Punched
+// openings exist only above HK_RETAIL_BELT, so a curtain grid cannot reach the pavement.
 function podiumStreetColor() {
   const y = positionWorld.y;
   const n = normalWorld;
   const facing = step(abs(n.z), abs(n.x));
   const along = mix(positionWorld.z, positionWorld.x, facing);
-  const bay = fract(along.mul(0.227));
-  const pier = smoothstep(0.1, 0.16, bay).mul(float(1.0).sub(smoothstep(0.84, 0.9, bay)));
+  const u = fract(along.mul(HK_SHOP_BAY / HK_SHOP_BAYS));
+  const v = clamp(y.div(float(HK_RETAIL_BELT)), 0.0, 0.999);
+  const shop = texture(shopfrontMap(), vec2(u, v)).rgb;
   const wall = float(1.0).sub(step(0.72, abs(n.y)));
-  const plinth = float(1.0).sub(smoothstep(1.05, 1.22, y));
-  const shop = smoothstep(1.12, 1.28, y).mul(float(1.0).sub(smoothstep(3.25, 3.45, y))).mul(pier).mul(wall);
-  const fascia = smoothstep(3.25, 3.45, y).mul(float(1.0).sub(smoothstep(4.5, 4.7, y))).mul(wall);
   const belt = float(HK_RETAIL_BELT);
   const above = smoothstep(belt, belt.add(0.15), y);
+  const bay = fract(along.mul(HK_SHOP_BAY));
   const storey = fract(y.sub(belt).div(3.9));
   const hole = smoothstep(0.28, 0.36, bay).mul(float(1.0).sub(smoothstep(0.64, 0.72, bay)));
   const punched = above
@@ -1953,14 +1976,9 @@ function podiumStreetColor() {
     .mul(float(1.0).sub(smoothstep(0.68, 0.76, storey)))
     .mul(hole)
     .mul(wall);
-  const granite = vec3(0.34, 0.33, 0.31);
-  const stone = vec3(0.55, 0.5, 0.45);
-  const tile = vec3(0.78, 0.71, 0.58);
-  const mouth = vec3(0.07, 0.06, 0.055);
   const ashlar = vec3(0.63, 0.58, 0.52);
   const pane = vec3(0.13, 0.17, 0.2);
-  const base = mix(mix(mix(stone, granite, plinth), mouth, shop), tile, fascia);
-  return mix(mix(base, ashlar, above), pane, punched);
+  return mix(shop, mix(ashlar, pane, punched), above);
 }
 
 function podiumShopGlow() {
@@ -1968,7 +1986,7 @@ function podiumShopGlow() {
   const n = normalWorld;
   const facing = step(abs(n.z), abs(n.x));
   const along = mix(positionWorld.z, positionWorld.x, facing);
-  const bay = fract(along.mul(0.227));
+  const bay = fract(along.mul(HK_SHOP_BAY));
   const pier = smoothstep(0.1, 0.16, bay).mul(float(1.0).sub(smoothstep(0.84, 0.9, bay)));
   const wall = float(1.0).sub(step(0.72, abs(n.y)));
   const shop = smoothstep(1.35, 1.55, y).mul(float(1.0).sub(smoothstep(3.05, 3.2, y))).mul(pier).mul(wall);
@@ -1979,12 +1997,14 @@ function podiumShopGlow() {
 
 /**
  * Opaque shopfront for extrude and canyon gaps that have no LandsD mesh yet.
- * Granite meets the pavement. The shop mouth is above that plinth. No window
- * grid runs through this belt.
+ * The albedo is hkShopfrontAlbedo (plinth, shop mouth, tile, sign band).
+ * No window grid runs through this belt.
  */
 function createRetailPodiumMaterial() {
   if (_retailPodium) return _retailPodium;
+  const map = shopfrontMap();
   const mat = new THREE.MeshStandardNodeMaterial({
+    map,
     roughness: 0.9,
     metalness: 0.02
   });
