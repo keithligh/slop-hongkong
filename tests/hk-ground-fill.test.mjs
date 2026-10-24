@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HK_CORE_WORLD, HONG_KONG_ISLAND_COASTLINE, ROADS, BLOCKS, blockInHkCore, hkFootprintHeight } from '../js/city-config.js';
-import { clipCanyonWalls, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
+import { canyonGlassWalls, clipCanyonWalls, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
 
 function contains(wall, x, z) {
   const dx = x - wall.obb.cx;
@@ -205,4 +205,61 @@ test('a podium slab whose body reaches a LandsD mesh is not drawn over the shopf
   const kept = clipCanyonWalls([wall], clear, { sample: 4, margin: 3, minLen: 3.2 });
   assert.equal(kept.length, 1);
   assert.ok(kept[0].len > 15);
+});
+
+// Digit1 gap ribbon. Centreline is 81.3 m from the eye, so the 80 m disc keeps
+// the shopfront. Henderson's box is the photograph the curtain was hiding.
+// Long axis across the radius from the eye. Both samples stay just outside
+// the 80 m disc, which is the measured 6.5 m ribbon (centreline 81.3 m).
+const digit1Gap = {
+  x: 77.2,
+  z: 49.9,
+  yaw: 0,
+  depth: 12,
+  len: 6.5,
+  side: 1,
+  rx: 0,
+  rz: 1,
+  dx: -0.253,
+  dz: 0.967,
+  raw: 'DES VOEUX ROAD CENTRAL',
+  highway: false,
+  narrow: false
+};
+const digit1Eye = { x: -1.4, z: 29.3, heading: 1.29 };
+const henderson = {
+  minX: 217.54,
+  maxX: 263.57,
+  minZ: 53.74,
+  maxZ: 104.96,
+  minH: 5.75,
+  maxH: 195.21
+};
+
+test('the Digit1 gap keeps its shopfront and drops the curtain in front of Henderson', () => {
+  const near = { minX: -4, maxX: 2, minZ: 27, maxZ: 32, minH: 5, maxH: 40 };
+  const retail = clipCanyonWalls([digit1Gap], [near, henderson], {
+    eye: digit1Eye,
+    near: 80,
+    sample: 4,
+    minLen: 3.2
+  });
+  assert.equal(retail.length, 1);
+  assert.ok(retail[0].len > 5);
+  const glass = canyonGlassWalls([digit1Gap], [henderson], { eye: digit1Eye });
+  assert.equal(glass.length, 0);
+  assert.equal(canyonGlassWalls([digit1Gap], []).length, 1);
+  const behind = { ...digit1Gap, x: -80, z: 10 };
+  assert.equal(canyonGlassWalls([behind], [henderson], { eye: digit1Eye }).length, 1);
+  const kiosk = { ...henderson, minH: 5.75, maxH: 9.75 };
+  assert.equal(canyonGlassWalls([digit1Gap], [kiosk], { eye: digit1Eye }).length, 1);
+  const courtyard = {
+    minX: 300,
+    maxX: 360,
+    minZ: 80,
+    maxZ: 150,
+    minH: 5,
+    maxH: 80
+  };
+  assert.equal(canyonGlassWalls([digit1Gap], [courtyard], { eye: digit1Eye }).length, 1);
 });

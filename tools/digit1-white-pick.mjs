@@ -33,7 +33,7 @@ import {
   hkMassingPlan,
   hkResolveLandmarks
 } from '../js/city-config.js';
-import { HK_CANYON_HEIGHT, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
+import { HK_CANYON_HEIGHT, canyonGlassWalls, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
 import {
   hiddenExtrudeIds,
   hk80ToWorld,
@@ -265,17 +265,33 @@ export function pickProcedural(origin, dir, world) {
   }
   for (const wall of world.walls) {
     const y0 = 0.16;
+    const y1 = HK_RETAIL_BELT;
+    const t = rayWall(origin, dir, wall, y0, y1);
+    if (t == null) continue;
+    hits.push(hitAt(origin, dir, t, {
+      layer: 'canyon-ribbon',
+      mesh: 'HkCentralStreetWalls',
+      id: wall.raw || '',
+      name: wall.raw || '',
+      material: 'hkRetailPodium',
+      map: false,
+      parent: 'HkCityGrid',
+      hiddenByGltf: false,
+      ownsLandmark: false
+    }));
+  }
+  for (const wall of world.glassWalls || []) {
+    const y0 = HK_RETAIL_BELT;
     const y1 = 0.16 + HK_CANYON_HEIGHT;
     const t = rayWall(origin, dir, wall, y0, y1);
     if (t == null) continue;
     const y = origin.y + dir.y * t;
-    const glass = y >= HK_RETAIL_BELT;
     hits.push(hitAt(origin, dir, t, {
       layer: 'canyon-ribbon',
-      mesh: glass ? 'HkCentralStreetWallsGlass' : 'HkCentralStreetWalls',
+      mesh: 'HkCentralStreetWallsGlass',
       id: wall.raw || '',
       name: wall.raw || '',
-      material: glass ? 'hkCanyonGlass' : 'hkRetailPodium',
+      material: 'hkCanyonGlass',
       map: false,
       parent: 'HkCityGrid',
       hiddenByGltf: false,
@@ -322,10 +338,14 @@ function buildWorld(gltfBoxes) {
     island: HONG_KONG_ISLAND_COASTLINE
   });
   let walls = canyon.walls;
+  let glassWalls = walls;
   if (gltfBoxes.length) {
     walls = clipWallsInline(walls, gltfBoxes);
+    glassWalls = canyonGlassWalls(walls, gltfBoxes, {
+      eye: { x: -1.4, z: 29.3, heading: 1.29 }
+    });
   }
-  return { extrudes, landmarks, walls, hiddenIds: hidden, gltfBoxes };
+  return { extrudes, landmarks, walls, glassWalls, hiddenIds: hidden, gltfBoxes };
 }
 
 function clipWallsInline(walls, meshes) {

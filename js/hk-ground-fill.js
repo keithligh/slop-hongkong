@@ -3,6 +3,7 @@
 // footprint or standing in for a side that has none. There is no plaza fill
 // and no lawn verge. Victoria Harbour stays outside the island ring.
 
+import { digit1ChasePose } from './digit1-probe-frame.js';
 import { carriagewayWidth, HK_CURB_W, HK_WALK_W, segmentFrame } from './hk-road-deck.js';
 
 export const HK_CANYON_DEPTH = 12;
@@ -314,6 +315,156 @@ export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen 
       while (j < steps && !covered[j]) j++;
       const t0 = -half + i * dt;
       const t1 = -half + j * dt;
+      const len = t1 - t0;
+      if (len >= minLen) {
+        const mid = (t0 + t1) * 0.5;
+        const x = wall.x + wall.dx * mid;
+        const z = wall.z + wall.dz * mid;
+        out.push({
+          ...wall,
+          x,
+          z,
+          len,
+          ...obbOf(x, z, wall.yaw, wall.depth, len)
+        });
+      }
+      i = j;
+    }
+  }
+  return out;
+}
+
+function chaseLook(eye) {
+  const pose = digit1ChasePose({
+    x: eye?.x ?? -1.4,
+    z: eye?.z ?? 29.3,
+    heading: Number.isFinite(eye?.heading) ? eye.heading : 1.29
+  });
+  return { origin: pose.cam };
+}
+
+function lookFrame(x, z, eye) {
+  const heading = Number.isFinite(eye?.heading) ? eye.heading : 1.29;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  const dx = x - (eye?.x ?? -1.4);
+  const dz = z - (eye?.z ?? 29.3);
+  return {
+    along: dx * fx + dz * fz,
+    side: dx * -fz + dz * fx
+  };
+}
+
+function meshRiseBox(mesh, sidewalk) {
+  if (!mesh || !Number.isFinite(mesh.minX)) return null;
+  const rise = Number.isFinite(mesh.maxH) && Number.isFinite(mesh.minH) ? mesh.maxH - mesh.minH : null;
+  if (!(rise > 0)) return null;
+  return {
+    minX: mesh.minX,
+    maxX: mesh.maxX,
+    minZ: mesh.minZ,
+    maxZ: mesh.maxZ,
+    minY: sidewalk,
+    maxY: sidewalk + rise
+  };
+}
+
+function rayAabb(origin, dir, box) {
+  let t0 = 0;
+  let t1 = Infinity;
+  const axes = [
+    ['x', 'minX', 'maxX'],
+    ['y', 'minY', 'maxY'],
+    ['z', 'minZ', 'maxZ']
+  ];
+  for (const [key, lo, hi] of axes) {
+    const delta = dir[key];
+    if (Math.abs(delta) < 1e-9) {
+      if (origin[key] < box[lo] || origin[key] > box[hi]) return null;
+      continue;
+    }
+    let ta = (box[lo] - origin[key]) / delta;
+    let tb = (box[hi] - origin[key]) / delta;
+    if (ta > tb) {
+      const swap = ta;
+      ta = tb;
+      tb = swap;
+    }
+    if (ta > t0) t0 = ta;
+    if (tb < t1) t1 = tb;
+    if (t1 < t0) return null;
+  }
+  if (t1 < 0.2) return null;
+  return t0 > 0.2 ? t0 : t1;
+}
+
+function glassPointHitsMesh(origin, dir, boxes, beyond, reach) {
+  for (const box of boxes) {
+    const t = rayAabb(origin, dir, box);
+    if (t != null && t > beyond && t <= reach) return true;
+  }
+  return false;
+}
+
+// The retail belt stays where no LandsD box occupies the curb. The curtain
+// above it does not. From the Des Voeux chase, a glass sample whose look ray
+// meets a loaded mesh beyond the ribbon is the invented wall in front of a
+// photograph. That stretch is not drawn. A sample outside the look corridor,
+// or with no mesh behind it, keeps the glass. Raising the 80 m disc is not
+// this test: an empty curb just outside that disc keeps its shopfront.
+export function canyonGlassWalls(walls, meshes, {
+  eye = null,
+  belt = 8.02,
+  sidewalk = 0.22,
+  sample = 4,
+  minLen = 3.2,
+  reach = 500,
+  half = 72,
+  // A box farther than this is not the street face the glass is hiding.
+  // Henderson is about 230 m down the Des Voeux ray. A 100 m courtyard box
+  // past 360 m can contain that ray and still have no triangle on it.
+  cover = 260
+} = {}) {
+  const list = (meshes || []).map((mesh) => meshRiseBox(mesh, sidewalk)).filter(Boolean);
+  if (!eye || !list.length) return (walls || []).slice();
+  const look = chaseLook(eye);
+  const out = [];
+  for (const wall of walls || []) {
+    if (!wall || !Number.isFinite(wall.dx) || !Number.isFinite(wall.dz) || !(wall.len > 0)) {
+      if (wall) out.push(wall);
+      continue;
+    }
+    const span = wall.len * 0.5;
+    const steps = Math.max(1, Math.ceil(wall.len / sample));
+    const dt = wall.len / steps;
+    const drop = [];
+    for (let i = 0; i < steps; i++) {
+      const t = -span + (i + 0.5) * dt;
+      const x = wall.x + wall.dx * t;
+      const z = wall.z + wall.dz * t;
+      const frame = lookFrame(x, z, eye);
+      if (!(frame.along > 8 && frame.along <= reach && Math.abs(frame.side) <= half)) {
+        drop.push(false);
+        continue;
+      }
+      const y = belt + 1.2;
+      const dx = x - look.origin.x;
+      const dy = y - look.origin.y;
+      const dz = z - look.origin.z;
+      const dist = Math.hypot(dx, dy, dz) || 1;
+      const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
+      drop.push(glassPointHitsMesh(look.origin, dir, list, dist + 2, cover));
+    }
+    let i = 0;
+    while (i < steps) {
+      if (drop[i]) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < steps && !drop[j]) j++;
+      const t0 = -span + i * dt;
+      const t1 = -span + j * dt;
       const len = t1 - t0;
       if (len >= minLen) {
         const mid = (t0 + t1) * 0.5;

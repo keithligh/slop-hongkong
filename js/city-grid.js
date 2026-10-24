@@ -22,7 +22,7 @@ import {
   createWaterMaterial
 } from './tsl-materials.js';
 import { GEO } from './geo-source.js';
-import { HK_CANYON_HEIGHT, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
+import { HK_CANYON_HEIGHT, canyonGlassWalls, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
 import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, planHkStreetGround } from './hk-pedestrian.js';
 import { planHkRoadDeck } from './hk-road-deck.js';
@@ -244,12 +244,18 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
   });
   wallMat.name = 'hkCanyonGlass';
   const ribbons = walls.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
+  const glass = gltfMeshes.length ? canyonGlassWalls(walls, gltfMeshes, {
+    eye: HK_STREET_EYE,
+    belt: HK_RETAIL_BELT,
+    sidewalk: ISLAND_BOUNDS.sidewalkHeight
+  }) : walls;
+  const glassRibbons = glass.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const baseY = 0.16;
   const baseH = Math.max(0.4, HK_RETAIL_BELT - baseY);
   const glassH = Math.max(0.4, HK_CANYON_HEIGHT - baseH);
   addHkRibbonMesh(group, retailMat, ribbons, baseY, baseH, 'HkCentralStreetWalls', 1);
-  addHkRibbonMesh(group, wallMat, ribbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
-  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap`);
+  addHkRibbonMesh(group, wallMat, glassRibbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
+  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} where the look does not meet a LandsD box`);
   return walls.map((wall) => ({
     minX: wall.minX,
     maxX: wall.maxX,
