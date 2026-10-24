@@ -255,7 +255,7 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
   const glassH = Math.max(0.4, HK_CANYON_HEIGHT - baseH);
   addHkRibbonMesh(group, retailMat, ribbons, baseY, baseH, 'HkCentralStreetWalls', 1);
   addHkRibbonMesh(group, wallMat, glassRibbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
-  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} where the look does not meet a LandsD box`);
+  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} where the look ray misses and no tall mesh is on the lot side`);
   return walls.map((wall) => ({
     minX: wall.minX,
     maxX: wall.maxX,
