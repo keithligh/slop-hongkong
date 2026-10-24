@@ -6,6 +6,7 @@ import {
   gltfAlbedoSampler,
   hiddenExtrudeIds,
   hk80ToWorld,
+  landsdAlbedoRow,
   landsdNullFillTriangles,
   planGltfManifest,
   resolveHkGltfRequest
@@ -87,8 +88,6 @@ function albedoMap(material) {
   return null;
 }
 
-// glTF v = 0 is the bottom of the chart. Canvas y = 0 is the top, and LandsD
-// textures are uploaded with flipY false, so the sample flips v.
 function nullFillSheet(tex) {
   if (tex.userData?.hkNullFill) return tex.userData.hkNullFill;
   if (tex.userData?.hkNullFillFailed) return null;
@@ -127,11 +126,9 @@ function sampleAlbedoTexel(tex, u, v) {
   const sheet = nullFillSheet(tex);
   if (!sheet) return null;
   let uu = u % 1;
-  let vv = v % 1;
   if (uu < 0) uu += 1;
-  if (vv < 0) vv += 1;
   const x = Math.min(sheet.w - 1, (uu * sheet.w) | 0);
-  const y = Math.min(sheet.h - 1, ((1 - vv) * sheet.h) | 0);
+  const y = landsdAlbedoRow(v, sheet.h);
   const i = (y * sheet.w + x) * 4;
   return [sheet.data[i], sheet.data[i + 1], sheet.data[i + 2]];
 }
@@ -145,8 +142,8 @@ function triangleIndex(geo) {
   return out;
 }
 
-// Street-height triangles whose three corners all sit on LandsD null fill are
-// omitted. The building and its photographic charts stay. A triangle that
+// Street-height triangles on LandsD null fill are omitted: every corner, or the
+// face centre. The building and its photographic charts stay. A triangle that
 // cannot be sampled stays too.
 function omitLandsdNullFill(geo, material) {
   const map = albedoMap(material);
@@ -156,6 +153,11 @@ function omitLandsdNullFill(geo, material) {
   const { index, dropped } = landsdNullFillTriangles(src, (vertex) => {
     if (vertex < 0 || vertex >= uv.count) return null;
     return sampleAlbedoTexel(map, uv.getX(vertex), uv.getY(vertex));
+  }, (a, b, c) => {
+    if (a < 0 || b < 0 || c < 0 || a >= uv.count || b >= uv.count || c >= uv.count) return null;
+    const u = (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3;
+    const v = (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3;
+    return sampleAlbedoTexel(map, u, v);
   });
   if (!dropped) return 0;
   if (!index.length) {

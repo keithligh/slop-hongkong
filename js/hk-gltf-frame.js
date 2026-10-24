@@ -292,8 +292,9 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
 // the chase sampler still does not ask for one. That sampler is not what paints
 // the blank podium. LandsD leaves large triangles on a constant atlas fill
 // (about 136,138,137, also 128,128,128 and black). Those triangles are omitted
-// so the same mesh's photographic charts remain. Off-look masses still keep a
-// real mip chain and anisotropy 16.
+// so the same mesh's photographic charts remain. The sample uses glTF v = 0 as
+// the first image row, the same row flipY false uploads. Off-look masses still
+// keep a real mip chain and anisotropy 16.
 
 // LandsD atlas padding. A texel this flat is not a facade photograph.
 export function isLandsdNullTexel(r, g, b) {
@@ -303,9 +304,23 @@ export function isLandsdNullTexel(r, g, b) {
   return false;
 }
 
-// Drop a triangle only when every corner samples that fill. A photographed
-// corner stays, and a missing sample stays (the mesh is not deleted).
-export function landsdNullFillTriangles(index, sampleVertex) {
+// glTF v = 0 is the first row of the file (the top). flipY false uploads that
+// row to texture v = 0. Row (1-v) is the other side of the chart.
+export function landsdAlbedoRow(v, height) {
+  if (!(height > 0)) return 0;
+  let vv = v % 1;
+  if (vv < 0) vv += 1;
+  return Math.min(height - 1, (vv * height) | 0);
+}
+
+function texelIsNull(rgb) {
+  return !!(rgb && isLandsdNullTexel(rgb[0], rgb[1], rgb[2]));
+}
+
+// Drop a triangle when every corner is padding, or when the face centre is.
+// A photographed centre stays. A missing sample stays (the mesh is not deleted).
+// The centre test is what removes a padding face that only shares a corner with a chart.
+export function landsdNullFillTriangles(index, sampleVertex, sampleCentroid) {
   const kept = [];
   let dropped = 0;
   const src = index || [];
@@ -316,12 +331,9 @@ export function landsdNullFillTriangles(index, sampleVertex) {
     const ca = sampleVertex(a);
     const cb = sampleVertex(b);
     const cc = sampleVertex(c);
-    if (
-      ca && cb && cc
-      && isLandsdNullTexel(ca[0], ca[1], ca[2])
-      && isLandsdNullTexel(cb[0], cb[1], cb[2])
-      && isLandsdNullTexel(cc[0], cc[1], cc[2])
-    ) {
+    const cornersNull = texelIsNull(ca) && texelIsNull(cb) && texelIsNull(cc);
+    const centroidNull = sampleCentroid ? texelIsNull(sampleCentroid(a, b, c)) : false;
+    if (cornersNull || centroidNull) {
       dropped++;
       continue;
     }

@@ -15,6 +15,7 @@ import {
   gltfTextureMaxEdge,
   hiddenExtrudeIds,
   isLandsdNullTexel,
+  landsdAlbedoRow,
   landsdNullFillTriangles,
   hk80GridToHk80Geog,
   hk80GridToWgs84,
@@ -231,6 +232,18 @@ test('LandsD null-fill triangles drop and a photographed corner stays', () => {
   const photo = landsdNullFillTriangles([0, 1, 2], (i) => colors[i + 3]);
   assert.equal(photo.dropped, 0);
   assert.deepEqual(photo.index, [0, 1, 2]);
+  // A face whose centre is padding is a hole even when one corner touches a chart.
+  const centre = landsdNullFillTriangles(
+    [0, 1, 2, 3, 4, 5],
+    (i) => (i < 3 ? [180, 170, 160] : [90, 82, 64]),
+    (a) => (a === 0 ? [136, 138, 137] : [90, 82, 64])
+  );
+  assert.equal(centre.dropped, 1);
+  assert.deepEqual(centre.index, [3, 4, 5]);
+  // v = 0 is the first image row. The opposite row is the padding this chase was sampling.
+  assert.equal(landsdAlbedoRow(0, 4096), 0);
+  assert.equal(landsdAlbedoRow(0.727, 4096), 2977);
+  assert.ok(landsdAlbedoRow(0.727, 4096) > 2048);
 });
 
 test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses do not', () => {
