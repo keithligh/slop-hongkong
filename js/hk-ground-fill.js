@@ -257,12 +257,24 @@ function hitsMesh(x, z, meshes, margin) {
   ));
 }
 
-// Drop invented street wall where a LandsD mesh covers the centreline, or where
-// the wall's outer face (the side toward the lot) stands in that mesh. A 12 m
-// ribbon on the sidewalk sits in front of the photograph; its centreline is
-// outside the mesh, so a centreline-only test left a flat podium over the
-// shopfront past the 80 m disc. A gap with no mesh behind it keeps its wall.
-// When `eye` is set and a mesh lies within `near` of it, the same disc is dropped too.
+function distToMesh(x, z, meshes) {
+  let best = Infinity;
+  for (const mesh of meshes) {
+    const cx = Math.max(mesh.minX, Math.min(x, mesh.maxX));
+    const cz = Math.max(mesh.minZ, Math.min(z, mesh.maxZ));
+    const d = Math.hypot(x - cx, z - cz);
+    if (d < best) best = d;
+  }
+  return best;
+}
+
+// Drop invented street wall where a LandsD mesh covers the centreline, the
+// outer face, or the slab itself. A 12 m ribbon can sit entirely in front of
+// the photograph: the centreline misses the mesh, and so does the face that
+// points at the lot the ribbon was built for, while the body still covers the
+// shopfront. Half the depth plus `margin` is that body. A gap with no mesh
+// behind it keeps its wall. When `eye` is set and a mesh lies within `near`
+// of it, the same disc is dropped too.
 export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen = 3.2, eye = null, near = 80 } = {}) {
   if (!meshes?.length) return (walls || []).slice();
   const killNear = !!(eye && meshes.some((mesh) => boxClosestDistance(mesh, eye) <= near));
@@ -283,7 +295,12 @@ export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen 
       const reach = wall.depth > 0 && Number.isFinite(wall.rx) && Number.isFinite(wall.side) ? wall.depth * 0.5 : 0;
       const ox = x + (wall.rx || 0) * (wall.side || 0) * reach;
       const oz = z + (wall.rz || 0) * (wall.side || 0) * reach;
-      const inMesh = hitsMesh(x, z, meshes, margin) || (reach > 0 && hitsMesh(ox, oz, meshes, margin));
+      // The ribbon is a slab. Its centreline can miss the photograph while the
+      // body still stands in front of the shopfront. Half the depth is the
+      // slab; `margin` is the gap that still reads as one podium.
+      const inMesh = distToMesh(x, z, meshes) <= reach + margin
+        || hitsMesh(x, z, meshes, margin)
+        || (reach > 0 && hitsMesh(ox, oz, meshes, margin));
       const inEye = killNear && Math.hypot(x - eye.x, z - eye.z) <= near;
       covered.push(inMesh || inEye);
     }

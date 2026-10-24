@@ -181,3 +181,28 @@ test('a sidewalk ribbon whose outer face hits a LandsD mesh is not drawn over th
   assert.equal(kept.length, 1);
   assert.ok(kept[0].len > 30);
 });
+
+test('a podium slab whose body reaches a LandsD mesh is not drawn over the shopfront', () => {
+  const wall = {
+    x: 0,
+    z: 0,
+    yaw: 0,
+    depth: 12,
+    len: 20,
+    side: 1,
+    rx: 0,
+    rz: 1,
+    dx: 1,
+    dz: 0,
+    raw: 'DES VOEUX ROAD CENTRAL',
+    highway: false,
+    narrow: false
+  };
+  // Centreline at z = 0. Half the 12 m slab reaches z = 6. The photograph starts at z = 8.
+  const mesh = [{ minX: -20, maxX: 20, minZ: 8, maxZ: 40 }];
+  assert.equal(clipCanyonWalls([wall], mesh, { sample: 4, margin: 3, minLen: 3.2 }).length, 0);
+  const clear = [{ minX: -20, maxX: 20, minZ: 30, maxZ: 50 }];
+  const kept = clipCanyonWalls([wall], clear, { sample: 4, margin: 3, minLen: 3.2 });
+  assert.equal(kept.length, 1);
+  assert.ok(kept[0].len > 15);
+});

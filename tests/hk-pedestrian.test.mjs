@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ROADS } from '../js/city-config.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import {
+  HK_BUS_SHELTER,
   HK_FOOTWAY_WIDTH,
   HK_SIDEWALK_WIDTH,
   collectHkPedestrian,
@@ -121,12 +122,20 @@ test('Des Voeux eye height has mapped pavement, a zebra, and the Statue Square s
   assert.ok(plan.walks.some((walk) => walk.w === HK_SIDEWALK_WIDTH && near(walk, eye, 16)));
   assert.ok(plan.walks.some((walk) => near(walk, along, 12)));
   assert.ok(plan.crossings.some((bar) => near(bar, along, 25)));
-  const stop = plan.stops.find((item) => item.name === '皇后像廣場' && near(item, eye, 22));
+  const stop = plan.stops
+    .filter((item) => item.name === '皇后像廣場')
+    .sort((a, b) => Math.hypot(a.x - eye.x, a.z - eye.z) - Math.hypot(b.x - eye.x, b.z - eye.z))[0];
   assert.ok(stop);
   assert.equal(stop.shelter, true);
+  assert.ok(Math.hypot(stop.x - eye.x, stop.z - eye.z) <= 20);
+  assert.ok(HK_BUS_SHELTER.signH >= 0.6);
+  assert.ok(HK_BUS_SHELTER.roofLen >= 4.5);
+  assert.ok(HK_BUS_SHELTER.signY > 1.6 && HK_BUS_SHELTER.signY < HK_BUS_SHELTER.roofY);
   assert.ok(HK_PEDESTRIAN.attribution.includes('OpenStreetMap'));
   assert.deepEqual(HK_PEDESTRIAN.bbox, [22.276, 114.150, 22.288, 114.170]);
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
+  assert.match(grid, /HK_BUS_SHELTER/);
+  assert.match(grid, /DoubleSide/);
   const html = readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(grid, /planHkStreetGround\(HK_PEDESTRIAN, ROADS\)/);
   assert.match(grid, /HkOsmPavement/);

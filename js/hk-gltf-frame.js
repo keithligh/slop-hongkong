@@ -287,15 +287,17 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// Chase atlases are one mip. The 4096 chart is the sample. A generated mip
-// chain still resolved to a muddy level along Des Voeux after anisotropy 16 and a
-// -1.25 LOD bias, including on The Henderson once it sat past the 120 m disc.
-// Anisotropy stays 16: the sampler is linear, and the GPU clamps that sample
-// to the only uploaded level.
+// Chase atlases are one mip, sampled with a linear filter and no anisotropy.
+// The Henderson charts are 4096 photographs. A generated mip chain, and a
+// mipmapped min-filter on a chain that was never uploaded, both leave level 0
+// on a street-height wall: the podium flattens to the atlas's light fill and
+// the missing facade charts come back as brown patches. Anisotropy is what
+// steps that wall onto the bad level, so the chase sampler does not ask for it.
+// Off-look masses still keep a real mip chain and anisotropy 16.
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
-  if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 16 };
-  return { maxEdge, mipmaps: true, anisotropy: 16 };
+  if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 1, minFilter: 'linear' };
+  return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
 }
 
 function bankOfChinaPins() {

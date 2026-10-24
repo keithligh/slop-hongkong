@@ -90,16 +90,18 @@ function sharpenPhoto(material, sampler) {
       if (sampler.mipmaps) {
         if (!tex.userData.hkFullRes) limitPhoto(tex, sampler.maxEdge);
         tex.generateMipmaps = true;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.anisotropy = sampler.anisotropy;
       } else {
-        // One level, so the street sample cannot leave the 4096 JPEG.
-        // minFilter stays mip-linear so anisotropy is legal; the missing chain
-        // clamps that sample to level 0.
+        // One level. LinearMipmapLinearFilter on that level is the brown patch:
+        // the GPU's anisotropic lookup steps off the 4096 chart into a mip that
+        // was never uploaded, and the street-height wall is where that happens.
         tex.userData.hkFullRes = true;
         tex.generateMipmaps = false;
+        tex.minFilter = THREE.LinearFilter;
+        tex.anisotropy = sampler.anisotropy;
       }
       tex.magFilter = THREE.LinearFilter;
-      tex.minFilter = THREE.LinearMipmapLinearFilter;
-      tex.anisotropy = sampler.anisotropy;
       tex.needsUpdate = true;
     }
     // FME 2024 writes a constant metallicFactor (0.5 on the Des Voeux sheets) and

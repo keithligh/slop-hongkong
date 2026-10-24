@@ -196,6 +196,7 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   const gltfJs = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
   assert.match(gltfJs, /gltfAlbedoSampler/);
   assert.match(gltfJs, /generateMipmaps = false/);
+  assert.match(gltfJs, /LinearFilter/);
   assert.match(gltfJs, /metalness = 0/);
   assert.match(gltfJs, /anisotropy = sampler\.anisotropy/);
   assert.doesNotMatch(gltfJs, /\.bias\(/);
@@ -219,11 +220,13 @@ test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses 
   const nearPhoto = gltfAlbedoSampler({ minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 });
   assert.equal(nearPhoto.maxEdge, 0);
   assert.equal(nearPhoto.mipmaps, false);
-  assert.equal(nearPhoto.anisotropy, 16);
+  assert.equal(nearPhoto.anisotropy, 1);
+  assert.equal(nearPhoto.minFilter, 'linear');
   const farPhoto = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
   assert.equal(farPhoto.maxEdge, 2048);
   assert.equal(farPhoto.mipmaps, true);
   assert.equal(farPhoto.anisotropy, 16);
+  assert.equal(farPhoto.minFilter, 'mipmap');
   // The Henderson, 11-SW-9C B347491569901063A0, about 220 m down the chase.
   const henderson = { minX: 218, maxX: 264, minZ: 54, maxZ: 105 };
   assert.equal(gltfInStreetChase(henderson), true);
@@ -232,10 +235,12 @@ test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses 
   assert.equal(gltfTextureMaxEdge(henderson), 0);
   assert.equal(hendersonPhoto.maxEdge, 0);
   assert.equal(hendersonPhoto.mipmaps, false);
-  assert.equal(hendersonPhoto.anisotropy, 16);
+  assert.equal(hendersonPhoto.anisotropy, 1);
+  assert.equal(hendersonPhoto.minFilter, 'linear');
   const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
   const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
   assert.equal(gltfAlbedoSampler(fairmont).mipmaps, false);
+  assert.equal(gltfAlbedoSampler(fairmont).minFilter, 'linear');
   assert.equal(gltfAlbedoSampler(lippo).mipmaps, false);
   const behind = { minX: -220, maxX: -160, minZ: 0, maxZ: 50 };
   assert.equal(gltfInStreetChase(behind), false);

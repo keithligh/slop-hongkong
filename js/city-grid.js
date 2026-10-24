@@ -24,7 +24,7 @@ import {
 import { GEO } from './geo-source.js';
 import { HK_CANYON_HEIGHT, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
 import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
-import { planHkStreetGround } from './hk-pedestrian.js';
+import { HK_BUS_SHELTER, planHkStreetGround } from './hk-pedestrian.js';
 import { planHkRoadDeck } from './hk-road-deck.js';
 
 // Hong Kong coast, Victoria Harbour, and the centreline asphalt deck. Lots stay in buildings.js.
@@ -254,28 +254,28 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
 
 function paintStopLabel(text) {
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 64;
+  canvas.width = 512;
+  canvas.height = 160;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return new THREE.MeshBasicNodeMaterial({ color: 0xf0c31a, name: 'hkBusStop' });
+  if (!ctx) return new THREE.MeshBasicNodeMaterial({ color: 0xf0c31a, name: 'hkBusStop', side: THREE.DoubleSide });
   const draw = () => {
     ctx.fillStyle = '#f0c31a';
-    ctx.fillRect(0, 0, 256, 64);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = '#1a1408';
-    let size = 28;
+    let size = 72;
     ctx.font = `700 ${size}px "Noto Sans TC", sans-serif`;
-    while (size > 14 && ctx.measureText(text).width > 236) {
+    while (size > 28 && ctx.measureText(text).width > canvas.width - 36) {
       size -= 2;
       ctx.font = `700 ${size}px "Noto Sans TC", sans-serif`;
     }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 128, 34);
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 2);
   };
   draw();
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
-  const mat = new THREE.MeshBasicNodeMaterial({ map });
+  const mat = new THREE.MeshBasicNodeMaterial({ map, side: THREE.DoubleSide });
   mat.name = 'hkBusStop';
   if (document.fonts?.ready) {
     document.fonts.ready.then(() => {
@@ -333,15 +333,16 @@ function buildHkPedestrianGround(group) {
   const colliders = [];
   const labels = new Map();
   for (const stop of plan.stops) {
-    poles.push({ x: stop.x, z: stop.z, yaw: 0, w: 0.1, len: 0.1 });
+    const shelter = HK_BUS_SHELTER;
+    poles.push({ x: stop.x, z: stop.z, yaw: 0, w: shelter.poleW, len: shelter.poleW });
     if (stop.shelter && !stop.inRoad) {
       const away = stop.yaw + Math.PI;
       roofs.push({
-        x: stop.x + Math.sin(away) * 0.55,
-        z: stop.z + Math.cos(away) * 0.55,
+        x: stop.x + Math.sin(away) * shelter.roofSetback,
+        z: stop.z + Math.cos(away) * shelter.roofSetback,
         yaw: stop.roadYaw,
-        w: 1.35,
-        len: 3.1
+        w: shelter.roofW,
+        len: shelter.roofLen
       });
     }
     if (stop.name && typeof document !== 'undefined') {
@@ -350,9 +351,9 @@ function buildHkPedestrianGround(group) {
         mat = paintStopLabel(stop.name);
         labels.set(stop.name, mat);
       }
-      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.36, 0.05), mat);
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(shelter.signW, shelter.signH, shelter.signD), mat);
       sign.name = 'HkBusStopSign';
-      sign.position.set(stop.x, 2.22, stop.z);
+      sign.position.set(stop.x, shelter.signY, stop.z);
       sign.rotation.y = stop.yaw;
       sign.castShadow = true;
       group.add(sign);
@@ -373,8 +374,8 @@ function buildHkPedestrianGround(group) {
     if (item.kind === 'bench') benches.push(slab);
     else lamps.push(slab);
   }
-  const poleMesh = addHkRibbonMesh(group, poleMat, poles, 0.22, 2.55, 'HkBusPoles', 2);
-  const roofMesh = addHkRibbonMesh(group, roofMat, roofs, 2.62, 0.08, 'HkBusShelters', 2);
+  const poleMesh = addHkRibbonMesh(group, poleMat, poles, HK_BUS_SHELTER.poleY, HK_BUS_SHELTER.poleH, 'HkBusPoles', 2);
+  const roofMesh = addHkRibbonMesh(group, roofMat, roofs, HK_BUS_SHELTER.roofY, HK_BUS_SHELTER.roofH, 'HkBusShelters', 2);
   if (poleMesh) poleMesh.castShadow = true;
   if (roofMesh) roofMesh.castShadow = true;
   const bench = furniturePose('bench');

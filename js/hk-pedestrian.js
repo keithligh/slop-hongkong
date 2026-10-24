@@ -8,6 +8,24 @@ import { carriagewayWidth, segmentFrame } from './hk-road-deck.js';
 export const HK_SIDEWALK_WIDTH = 3.4;
 export const HK_FOOTWAY_WIDTH = 2.05;
 export const HK_STOP_DEDUPE_M = 8;
+// 皇后像廣場 sits 14–21 m from the Des Voeux eye, on the north pavement.
+// The roof runs along the kerb. The plate faces the carriageway and crosses
+// the eye line (person eye ≈ 1.9 m), so the Chinese name is readable there.
+// Nothing here is drawn unless the node is highway=bus_stop and shelter=yes.
+export const HK_BUS_SHELTER = Object.freeze({
+  roofW: 1.85,
+  roofLen: 5.4,
+  roofY: 2.46,
+  roofH: 0.18,
+  roofSetback: 0.85,
+  signW: 2.4,
+  signH: 0.72,
+  signD: 0.08,
+  signY: 1.92,
+  poleW: 0.16,
+  poleY: 0.22,
+  poleH: 2.42
+});
 const ROAD_CELL = 28;
 
 function round1(value) {
