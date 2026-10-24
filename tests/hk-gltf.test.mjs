@@ -9,6 +9,7 @@ import {
   boundsFromGltf,
   chooseCentralSheet,
   formatGltfLog,
+  gltfAlbedoSampler,
   gltfTextureMaxEdge,
   hiddenExtrudeIds,
   hk80GridToHk80Geog,
@@ -191,10 +192,12 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.match(script, /11-SW-8D/);
   assert.match(script, /subsetStreetSheet/);
   const gltfJs = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
-  assert.match(gltfJs, /gltfTextureMaxEdge/);
-  assert.match(gltfJs, /anisotropy = 16/);
-  assert.match(gltfJs, /-1\.25/);
-  assert.match(gltfJs, /\.bias\(float\(bias\)\)/);
+  assert.match(gltfJs, /gltfAlbedoSampler/);
+  assert.match(gltfJs, /generateMipmaps = false/);
+  assert.match(gltfJs, /metalness = 0/);
+  assert.match(gltfJs, /anisotropy = sampler\.anisotropy/);
+  assert.doesNotMatch(gltfJs, /\.bias\(/);
+  assert.doesNotMatch(gltfJs, /colorNode/);
   assert.doesNotMatch(gltfJs, /limitPhoto\(mat\.map\)/);
 });
 
@@ -210,6 +213,14 @@ test('Des Voeux eye ranks ahead of a mass closer to the origin, and full-res sto
   assert.equal(plan.skippedCap, 1);
   assert.equal(gltfTextureMaxEdge({ minX: -2, maxX: 2, minZ: 28, maxZ: 32 }), 0);
   assert.equal(gltfTextureMaxEdge({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 }), 2048);
+  const nearPhoto = gltfAlbedoSampler({ minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 });
+  assert.equal(nearPhoto.maxEdge, 0);
+  assert.equal(nearPhoto.mipmaps, false);
+  assert.equal(nearPhoto.anisotropy, 16);
+  const farPhoto = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
+  assert.equal(farPhoto.maxEdge, 2048);
+  assert.equal(farPhoto.mipmaps, true);
+  assert.equal(farPhoto.anisotropy, 16);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);
 });

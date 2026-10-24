@@ -1,10 +1,9 @@
 import * as THREE from 'three/webgpu';
-import { color as tslColor, float, texture } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, ISLAND_BOUNDS } from './city-config.js';
 import {
   formatGltfLog,
-  gltfTextureMaxEdge,
+  gltfAlbedoSampler,
   hiddenExtrudeIds,
   hk80ToWorld,
   planGltfManifest,
@@ -78,29 +77,35 @@ function limitPhoto(tex, maxEdge) {
 
 const PHOTO_MAPS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'];
 
-// Street-near atlases stay at the file resolution. Anisotropy plus a negative LOD bias
-// keeps the 4096 facade JPEG on a sharp mip when the camera is at eye height.
-function sharpenPhoto(material, maxEdge) {
+// The glTF material keeps its baseColor texture, UV set, and alpha. This only
+// corrects the sampler and the constant FME metal factor.
+function sharpenPhoto(material, sampler) {
   const list = Array.isArray(material) ? material : [material];
-  const bias = maxEdge === 0 ? -1.25 : -0.6;
   for (const mat of list) {
     if (!mat) continue;
     for (const key of PHOTO_MAPS) {
       const tex = mat[key];
       if (!tex?.isTexture) continue;
       if (key === 'map' || key === 'emissiveMap') tex.colorSpace = THREE.SRGBColorSpace;
-      if (maxEdge === 0) tex.userData.hkFullRes = true;
-      else if (!tex.userData.hkFullRes) limitPhoto(tex, maxEdge);
-      tex.anisotropy = 16;
+      if (sampler.mipmaps) {
+        if (!tex.userData.hkFullRes) limitPhoto(tex, sampler.maxEdge);
+        tex.generateMipmaps = true;
+      } else {
+        // One level, so the street sample cannot leave the 4096 JPEG.
+        // minFilter stays mip-linear so anisotropy is legal; the missing chain
+        // clamps that sample to level 0.
+        tex.userData.hkFullRes = true;
+        tex.generateMipmaps = false;
+      }
       tex.magFilter = THREE.LinearFilter;
       tex.minFilter = THREE.LinearMipmapLinearFilter;
-      tex.generateMipmaps = true;
+      tex.anisotropy = sampler.anisotropy;
       tex.needsUpdate = true;
     }
-    if (!mat.map || mat.userData.hkPhotoBias) continue;
-    const tint = tslColor(mat.color || 0xffffff);
-    mat.colorNode = texture(mat.map).bias(float(bias)).mul(tint);
-    mat.userData.hkPhotoBias = true;
+    // FME 2024 writes a constant metallicFactor (0.5 on the Des Voeux sheets) and
+    // no metalness map. That is not a measured metal: it replaces half the
+    // photograph with a rough-metal response, which is brown dirt in street shadow.
+    if (!mat.metalnessMap) mat.metalness = 0;
   }
 }
 
@@ -184,7 +189,7 @@ export async function mountHkGltfBuildings(scene, plan) {
         if (!obj.isMesh) return;
         const geo = bakeMesh(obj);
         if (!geo) return;
-        sharpenPhoto(obj.material, gltfTextureMaxEdge(entry));
+        sharpenPhoto(obj.material, gltfAlbedoSampler(entry));
         const mesh = new THREE.Mesh(geo, obj.material);
         mesh.name = 'HkGltfBuilding';
         mesh.castShadow = true;

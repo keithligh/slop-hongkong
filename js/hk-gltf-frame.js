@@ -237,6 +237,16 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return boxClosestDistance(entry, eye) <= near ? 0 : HK_GLTF_FAR_TEX;
 }
 
+// Street-near atlases are one mip. The 4096 chart is the sample. A generated mip
+// chain still resolved to a muddy level along Des Voeux after anisotropy 16 and a
+// -1.25 LOD bias. Anisotropy stays 16: the sampler is linear, and the GPU clamps
+// that sample to the only uploaded level.
+export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
+  const maxEdge = gltfTextureMaxEdge(entry, eye, near);
+  if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 16 };
+  return { maxEdge, mipmaps: true, anisotropy: 16 };
+}
+
 function bankOfChinaPins() {
   const pins = [];
   for (const block of BLOCKS) {
