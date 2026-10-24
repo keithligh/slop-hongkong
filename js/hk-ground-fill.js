@@ -250,6 +250,8 @@ function boxClosestDistance(box, eye) {
   return Math.hypot(x - eye.x, z - eye.z);
 }
 
+// Drop invented street wall where a LandsD mesh covers the centreline.
+// When `eye` is set and a mesh lies within `near` of it, the same disc is dropped too.
 export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen = 3.2, eye = null, near = 80 } = {}) {
   if (!meshes?.length) return (walls || []).slice();
   const killNear = !!(eye && meshes.some((mesh) => boxClosestDistance(mesh, eye) <= near));
