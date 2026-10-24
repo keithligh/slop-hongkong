@@ -2,13 +2,13 @@
 
 The Des Voeux chase loads a Planning Department 3D Photo-realistic Model as a street-corridor donor. The mesh is real PlanD capture. It is on without `?pland=donor`. `?pland=off` leaves the procedural corridor. LandsD photographs stay mounted in the donor mode, and the canyon shopfront stays on ribbons the LandsD clip did not remove.
 
-This is not a claim that the chase looks like Sleeping Dogs. No WebGPU frame was captured for this cut.
+This is not a claim that the chase looks like Sleeping Dogs. A headless frame of the default eye is `artifacts/digit1-eye-east-sbs.png` (tip b0e2460 beside this cut). On that probe, NDC 0, −0.08 stays the shopfront RGB(91, 24, 22). NDC 0, 0.08 is Henderson photo RGB(44, 47, 61). NDC 0, 0 is PlanD photo RGB(49, 59, 53), not pale. The grid has no pale lit pixel.
 
 ## What stays LandsD
 
 `11-SW-9C` and `11-SW-8D` still load when their manifests are present. A triangle is still dropped only when all three corners sample LandsD atlas padding. Photographic charts on those sheets are not replaced.
 
-The default page, and `?pland=donor`, draw the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. Canyon glass inside that same corridor is omitted while the clip is mounted, so `hkCanyonGlass` is not a toy band in front of the photograph. The shopfront mesh is a different list and stays, including the proven-empty Des Voeux curb past the 80 m disc. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that glass omit. Unknown values, including any street-view bake, leave PlanD off.
+The default page, and `?pland=donor`, draw the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. A triangle on the street side of a loaded LandsD box, within 16 m, is omitted. That is the 2017 shell in front of The Henderson, which otherwise paints a pale face over the photograph. A triangle inside the box stays. Canyon glass inside that same corridor is omitted while the clip is mounted, so `hkCanyonGlass` is not a toy band in front of the photograph. The shopfront mesh is a different list and stays, including the proven-empty Des Voeux curb past the 80 m disc. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that glass omit. Unknown values, including any street-view bake, leave PlanD off.
 
 ## Not a street-view atlas
 
@@ -85,7 +85,7 @@ Default: request `hk-3d/pland/manifest.json` and mount the clip as a donor when 
 
 While a PlanD manifest is loaded, footprint extrudes whose boxes sit in the Digit1 corridor are hidden, so the corridor is not glass in front of the aerial mesh. Gap walls outside that corridor are unchanged. The continuous mesh is not given a solid collider. A box around it would close Des Voeux.
 
-The loading line is 正在載入規劃署三維實景（中環街廊）…. The chart is drawn from the PlanD JPEG (already sunlit), with metalness 0. No shopfront is generated.
+The loading line is 正在載入規劃署三維實景（中環街廊）…. The chart is drawn from the PlanD JPEG (already sunlit), with metalness 0. The zip files are 8192². The page file, and any larger image the loader still sees, is uploaded at 2048 on the long edge. Eight full 8192² images plus mipmaps exited the GPU process before a frame could be read. The triangles are still the corridor clip. No shopfront is generated.
 
 ## Digit1 cameras
 

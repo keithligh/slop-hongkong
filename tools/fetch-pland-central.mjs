@@ -18,6 +18,7 @@ import {
   PLAND_ATTRIBUTION,
   PLAND_CAPTURE,
   PLAND_DATASET,
+  PLAND_PAGE_TEX_EDGE,
   PLAND_TILES_API,
   assertPlandFileType,
   createPlandObjClipper,
@@ -88,6 +89,21 @@ function extractEntry(zipPath, entry, dest) {
   mkdirSync(dest, { recursive: true });
   const result = spawnSync('unzip', ['-q', '-o', '-j', '-d', dest, zipPath, entry], { encoding: 'utf8' });
   if (result.status !== 0) throw new Error(result.stderr || `unzip failed for ${entry}`);
+}
+
+// The zip JPEG is 8192². The page file is a box-filter of that image at
+// PLAND_PAGE_TEX_EDGE so eight tiles do not kill the WebGPU device.
+function capPlandJpeg(file, maxEdge = PLAND_PAGE_TEX_EDGE) {
+  const tmp = `${file}.cap.jpg`;
+  const result = spawnSync('ffmpeg', [
+    '-y', '-loglevel', 'error', '-i', file,
+    '-vf', `scale='min(${maxEdge},iw)':-2`,
+    '-q:v', '3', tmp
+  ], { encoding: 'utf8' });
+  if (result.status !== 0) throw new Error(result.stderr || `ffmpeg failed for ${file}`);
+  rmSync(file, { force: true });
+  const renamed = spawnSync('mv', [tmp, file], { encoding: 'utf8' });
+  if (renamed.status !== 0) throw new Error(renamed.stderr || `mv failed for ${file}`);
 }
 
 function directTile(grid, fileType) {
@@ -283,6 +299,7 @@ async function clipTile(tile, zipPath, streetHkpd, outDir) {
     const entry = entries.find((item) => item.endsWith(`/${file}`) || item.endsWith(file));
     if (!entry) throw new Error(`${tile.grid} missing texture ${file}`);
     extractEntry(zipPath, entry, tileDir);
+    capPlandJpeg(path.join(tileDir, path.basename(file)));
     imageByMaterial[name] = path.basename(file);
   }
   const primitives = writeCorridorGltf(tileDir, clip, imageByMaterial);

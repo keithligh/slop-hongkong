@@ -8,6 +8,9 @@ import { hk80ToWorld } from '../js/hk-gltf-frame.js';
 import {
   PLAND_ATTRIBUTION,
   PLAND_DATASET,
+  PLAND_LANDSD_SKIRT,
+  PLAND_PAGE_TEX_EDGE,
+  plandYieldsToLandsd,
   PLAND_DIGIT1_CAMERAS,
   PLAND_TILE_21_26_SAMPLE,
   PLAND_TILE_21_26_TRANSFORM,
@@ -225,6 +228,19 @@ test('Digit1 cameras are the person chase, and a corridor extrude is hidden only
   assert.equal(mtl.mat_tex_0, 'level_5_0_0_tex_0.jpg');
 });
 
+test('PlanD yields on the street side of Henderson and keeps the mid-street photo point', () => {
+  const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
+  const west = { minX: 29.4, maxX: 86.2, minZ: -43, maxZ: 35.4, minH: 4.4, maxH: 44.6 };
+  const queen = { minX: 12.9, maxX: 55.4, minZ: 49.8, maxZ: 95.7, minH: 4.6, maxH: 87 };
+  const boxes = [henderson, west, queen];
+  assert.equal(PLAND_LANDSD_SKIRT, 16);
+  assert.equal(plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, boxes), true);
+  assert.equal(plandYieldsToLandsd({ x: 80.2, y: 10, z: 52.8 }, boxes), false);
+  assert.equal(plandYieldsToLandsd({ x: 230, y: 40, z: 80 }, boxes), false);
+  assert.equal(plandYieldsToLandsd({ x: 212.8, y: 210, z: 91.1 }, boxes), false);
+  assert.equal(plandYieldsToLandsd({ x: 190, y: 31.7, z: 91.1 }, boxes), false);
+});
+
 test('corridor glass yields to PlanD and the Digit1 shopfront ribbon is not that list', () => {
   const eye = HK_STREET_EYE;
   const forward = Math.sin(eye.heading);
@@ -290,6 +306,10 @@ test('boot wires the flag, the fetch tool, and no street-view atlas bake', () =>
   assert.match(page, /GLTFLoader/);
   assert.match(page, /polygonOffset/);
   assert.match(page, /metalness = 0/);
+  assert.match(page, /capPlandMap/);
+  assert.equal(PLAND_PAGE_TEX_EDGE, 2048);
+  assert.match(tool, /PLAND_PAGE_TEX_EDGE/);
+  assert.match(tool, /ffmpeg/);
   assert.match(frame, /https:\/\/pdmap\.pland\.gov\.hk\/plandapi\/Tiles/);
   assert.match(tool, /plandTilesUrl/);
   assert.match(tool, /plandModelTransform/);

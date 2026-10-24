@@ -21,6 +21,14 @@ import { gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame
 export const PLAND_TILES_API = 'https://pdmap.pland.gov.hk/plandapi/Tiles';
 export const PLAND_DATASET = 'https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model';
 export const PLAND_ATTRIBUTION = '© 香港特別行政區政府規劃署 3D Photo-realistic Model / DATA.GOV.HK';
+// The capture JPEGs are 8192². Eight of those, plus mipmaps, killed the WebGPU
+// device (GPU process exit 9) before the Digit1 eye could present. The page
+// uploads this edge. The mesh triangles stay the corridor clip.
+export const PLAND_PAGE_TEX_EDGE = 2048;
+// Street-side apron in front of a loaded LandsD box. The 2017 shell can sit
+// proud of The Henderson and paint a pale face over the photograph. Interior
+// triangles stay, so an atlas hole can still show the aerial surface.
+export const PLAND_LANDSD_SKIRT = 16;
 export const PLAND_CAPTURE = 'Hong Kong Island aerial photographs, March 2017; tile files dated February 2019';
 
 // Metres above the sidewalk. Triangles entirely below this are the road carpet.
@@ -467,6 +475,36 @@ export function clipPlandObjText(text, options) {
   const clipper = createPlandObjClipper(options);
   for (const line of String(text).split(/\r?\n/)) clipper.pushLine(line);
   return clipper.finish();
+}
+
+export function plandYieldsToLandsd(point, boxes, {
+  eye = HK_STREET_EYE,
+  skirt = PLAND_LANDSD_SKIRT,
+  sidewalk = ISLAND_BOUNDS.sidewalkHeight
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.z)) return false;
+  for (const box of boxes || []) {
+    if (!box || !Number.isFinite(box.minX) || !Number.isFinite(box.maxX) || !Number.isFinite(box.minZ) || !Number.isFinite(box.maxZ)) {
+      continue;
+    }
+    if (Number.isFinite(point.y) && Number.isFinite(box.maxH) && Number.isFinite(box.minH)) {
+      const top = sidewalk + Math.max(0, box.maxH - box.minH) + 2;
+      if (point.y > top) continue;
+    }
+    const cx = Math.max(box.minX, Math.min(point.x, box.maxX));
+    const cz = Math.max(box.minZ, Math.min(point.z, box.maxZ));
+    const outX = point.x - cx;
+    const outZ = point.z - cz;
+    const outLen = Math.hypot(outX, outZ);
+    if (!(outLen > 0.05) || outLen > skirt) continue;
+    const ex = eye.x - cx;
+    const ez = eye.z - cz;
+    const eyeLen = Math.hypot(ex, ez);
+    if (!(eyeLen > 1)) continue;
+    const dot = (outX * ex + outZ * ez) / (outLen * eyeLen);
+    if (dot > 0.5) return true;
+  }
+  return false;
 }
 
 export function resolvePlandRequest(href) {

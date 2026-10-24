@@ -2,9 +2,11 @@ import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BLOCKS } from './city-config.js';
 import {
+  PLAND_PAGE_TEX_EDGE,
   formatPlandLog,
   planPlandManifest,
   plandLocalToWorld,
+  plandYieldsToLandsd,
   resolvePlandRequest,
   withPlandCorridorHidden
 } from './hk-pland-frame.js';
@@ -28,6 +30,22 @@ function donorOffset(mode) {
   }
 }
 
+function capPlandMap(map, maxEdge = PLAND_PAGE_TEX_EDGE) {
+  const image = map?.image;
+  const width = image?.width || 0;
+  const height = image?.height || 0;
+  if (!(width > maxEdge || height > maxEdge) || typeof document === 'undefined') return;
+  const scale = maxEdge / Math.max(width, height);
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  map.image = canvas;
+  map.needsUpdate = true;
+}
+
 function showPhoto(material, mode) {
   const donor = donorOffset(mode);
   const source = Array.isArray(material) ? material : [material];
@@ -35,6 +53,7 @@ function showPhoto(material, mode) {
   for (const mat of list) {
     const map = mat.map;
     if (map) {
+      capPlandMap(map);
       map.colorSpace = THREE.SRGBColorSpace;
       map.flipY = false;
       map.needsUpdate = true;
@@ -77,10 +96,74 @@ function bakeGeometry(geometry, transform, streetHkpd, sidewalk) {
   }
   const geo = geometry.clone();
   geo.setAttribute('position', new THREE.BufferAttribute(baked, 3));
+  return geo;
+}
+
+function finishBaked(geo) {
   geo.computeVertexNormals();
   geo.computeBoundingBox();
   geo.computeBoundingSphere();
   return geo;
+}
+
+// Donor only. A triangle whose centre sits on the street side of a loaded
+// LandsD box is the 2017 shell in front of that photograph. Compare keeps it.
+function trimPlandInFrontOfLandsd(geo, boxes) {
+  if (!geo) return { geo: null, dropped: 0 };
+  if (!boxes?.length) return { geo: finishBaked(geo), dropped: 0 };
+  const pos = geo.getAttribute('position');
+  const uv = geo.getAttribute('uv');
+  const index = geo.getIndex();
+  if (!pos) return { geo: null, dropped: 0 };
+  const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
+  const keptPos = new Float32Array(triCount * 9);
+  const keptUv = uv ? new Float32Array(triCount * 6) : null;
+  let written = 0;
+  let dropped = 0;
+  const corner = (slot) => {
+    const vi = index ? index.getX(slot) : slot;
+    return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
+  };
+  for (let t = 0; t < triCount; t++) {
+    const a = corner(t * 3);
+    const b = corner(t * 3 + 1);
+    const c = corner(t * 3 + 2);
+    const mid = {
+      x: (a[0] + b[0] + c[0]) / 3,
+      y: (a[1] + b[1] + c[1]) / 3,
+      z: (a[2] + b[2] + c[2]) / 3
+    };
+    if (plandYieldsToLandsd(mid, boxes)) {
+      dropped++;
+      continue;
+    }
+    const p = written * 9;
+    keptPos[p] = a[0];
+    keptPos[p + 1] = a[1];
+    keptPos[p + 2] = a[2];
+    keptPos[p + 3] = b[0];
+    keptPos[p + 4] = b[1];
+    keptPos[p + 5] = b[2];
+    keptPos[p + 6] = c[0];
+    keptPos[p + 7] = c[1];
+    keptPos[p + 8] = c[2];
+    if (keptUv) {
+      const u = written * 6;
+      keptUv[u] = a[3];
+      keptUv[u + 1] = a[4];
+      keptUv[u + 2] = b[3];
+      keptUv[u + 3] = b[4];
+      keptUv[u + 4] = c[3];
+      keptUv[u + 5] = c[4];
+    }
+    written++;
+  }
+  geo.dispose();
+  if (!written) return { geo: null, dropped };
+  const next = new THREE.BufferGeometry();
+  next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
+  if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
+  return { geo: finishBaked(next), dropped, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -112,7 +195,7 @@ export async function preparePlandCorridor(href) {
   return plan;
 }
 
-export async function mountPlandCorridor(scene, plan) {
+export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (!plan) return { loaded: 0, failed: 0, triangles: 0, group: null };
   const group = new THREE.Group();
   group.name = 'HkPlandCorridor';
@@ -120,14 +203,20 @@ export async function mountPlandCorridor(scene, plan) {
   let loaded = 0;
   let failed = 0;
   let triangles = 0;
+  let yielded = 0;
   const donor = donorOffset(plan.mode);
+  const boxes = donor ? landsdBoxes : [];
   for (const tile of plan.tiles) {
     try {
       const gltf = await loader.loadAsync(`./hk-3d/pland/${tile.gltf}`);
       let meshes = 0;
       gltf.scene.traverse((obj) => {
         if (!obj.isMesh) return;
-        const geo = bakeGeometry(obj.geometry, tile.modelTransform, plan.streetHkpd, plan.sidewalk);
+        const baked = bakeGeometry(obj.geometry, tile.modelTransform, plan.streetHkpd, plan.sidewalk);
+        if (!baked) return;
+        const trimmed = trimPlandInFrontOfLandsd(baked, boxes);
+        yielded += trimmed.dropped;
+        const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
         mesh.name = 'HkPlandMesh';
@@ -151,5 +240,6 @@ export async function mountPlandCorridor(scene, plan) {
   }
   if (group.children.length) scene.add(group);
   console.info(formatPlandLog({ ...plan, triangles }));
-  return { loaded, failed, triangles, group };
+  if (yielded) console.info(`[pland] omitted ${yielded} triangles on the street side of a LandsD box`);
+  return { loaded, failed, triangles, yielded, group };
 }

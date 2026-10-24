@@ -119,7 +119,7 @@ async function initApp() {
   if (plandPlan?.mode === 'compare') console.info('[pland] compare: LandsD individualised meshes stay off');
   markInit('gltf');
   if (loadingStatus && plandPlan) loadingStatus.textContent = '正在載入規劃署三維實景（中環街廊）…';
-  const plandMount = await mountPlandCorridor(scene, plandPlan);
+  const plandMount = await mountPlandCorridor(scene, plandPlan, gltfPlan?.selected || []);
   const plandCredit = document.getElementById('hud-pland-credit');
   if (plandCredit && plandPlan && plandMount.loaded > 0) {
     plandCredit.hidden = false;
