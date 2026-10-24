@@ -406,12 +406,43 @@ function glassPointHitsMesh(origin, dir, boxes, beyond, reach) {
   return false;
 }
 
+// Closest point of a tall box to the ribbon's outer face. The box counts when
+// that point lies on the lot side (not across the carriageway) and within
+// `behind` metres. A facade beside the outward normal still counts: the camera
+// ray often misses it. A box across the street has a negative lot component
+// and does not.
+function tallMeshBehindCell(x, z, wall, boxes, behind) {
+  if (!(behind > 0)) return false;
+  const nx = (wall.rx || 0) * (wall.side || 0);
+  const nz = (wall.rz || 0) * (wall.side || 0);
+  const span = Math.hypot(nx, nz);
+  if (!(span > 0)) return false;
+  const ux = nx / span;
+  const uz = nz / span;
+  const outer = wall.depth > 0 ? wall.depth * 0.5 : 0;
+  const ax = x + ux * outer;
+  const az = z + uz * outer;
+  for (const box of boxes) {
+    const cx = Math.max(box.minX, Math.min(ax, box.maxX));
+    const cz = Math.max(box.minZ, Math.min(az, box.maxZ));
+    const ox = cx - ax;
+    const oz = cz - az;
+    const along = ox * ux + oz * uz;
+    if (along < -3) continue;
+    if (Math.hypot(ox, oz) <= behind && along <= behind) return true;
+  }
+  return false;
+}
+
 // The retail belt stays where no LandsD box occupies the curb. The curtain
-// above it does not. From the Des Voeux chase, a glass sample whose look ray
-// meets a loaded mesh beyond the ribbon is the invented wall in front of a
-// photograph. That stretch is not drawn. A sample outside the look corridor,
-// or with no mesh behind it, keeps the glass. Raising the 80 m disc is not
-// this test: an empty curb just outside that disc keeps its shopfront.
+// above it does not. From the Des Voeux chase, a glass sample is omitted when
+// a loaded mesh is the facade that curtain stands in for:
+// - the look ray meets a mesh beyond the ribbon and within `cover`, or
+// - a mesh that rises through the belt sits on the lot side of the cell,
+//   within `behind` metres of the outer face (the ray can miss that box).
+// A sample outside the look corridor, a short kiosk, or a far courtyard keeps
+// its glass. Raising the 80 m disc is not this test: an empty curb just
+// outside that disc keeps its shopfront.
 export function canyonGlassWalls(walls, meshes, {
   eye = null,
   belt = 8.02,
@@ -423,10 +454,17 @@ export function canyonGlassWalls(walls, meshes, {
   // A box farther than this is not the street face the glass is hiding.
   // Henderson is about 230 m down the Des Voeux ray. A 100 m courtyard box
   // past 360 m can contain that ray and still have no triangle on it.
-  cover = 260
+  cover = 260,
+  // One block back from the outer face, including a facade beside the
+  // outward normal. Past this the box is the next street.
+  behind = 36,
+  // The mesh has to occupy the curtain band. A rise that stops in the
+  // shopfront is the kiosk case and does not delete the glass above it.
+  tall = 1
 } = {}) {
   const list = (meshes || []).map((mesh) => meshRiseBox(mesh, sidewalk)).filter(Boolean);
   if (!eye || !list.length) return (walls || []).slice();
+  const tallBoxes = list.filter((box) => box.maxY > belt + tall);
   const look = chaseLook(eye);
   const out = [];
   for (const wall of walls || []) {
@@ -453,7 +491,9 @@ export function canyonGlassWalls(walls, meshes, {
       const dz = z - look.origin.z;
       const dist = Math.hypot(dx, dy, dz) || 1;
       const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
-      drop.push(glassPointHitsMesh(look.origin, dir, list, dist + 2, cover));
+      const ray = glassPointHitsMesh(look.origin, dir, list, dist + 2, cover);
+      const lot = tallMeshBehindCell(x, z, wall, tallBoxes, behind);
+      drop.push(ray || lot);
     }
     let i = 0;
     while (i < steps) {

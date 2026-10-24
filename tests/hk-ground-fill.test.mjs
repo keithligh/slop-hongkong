@@ -263,3 +263,65 @@ test('the Digit1 gap keeps its shopfront and drops the curtain in front of Hende
   };
   assert.equal(canyonGlassWalls([digit1Gap], [courtyard], { eye: digit1Eye }).length, 1);
 });
+
+test('a tall mesh beside the look ray drops the curtain; a kiosk or the far side does not', () => {
+  const eye = digit1Eye;
+  const fx = Math.sin(eye.heading);
+  const fz = Math.cos(eye.heading);
+  const sx = -fz;
+  const sz = fx;
+  const along = 110;
+  const side = 18;
+  const x = eye.x + fx * along + sx * side;
+  const z = eye.z + fz * along + sz * side;
+  const wall = {
+    x,
+    z,
+    yaw: Math.atan2(fx, fz),
+    depth: 12,
+    len: 16,
+    side: 1,
+    rx: sx,
+    rz: sz,
+    dx: fx,
+    dz: fz,
+    raw: 'DES VOEUX ROAD CENTRAL',
+    highway: false,
+    narrow: false
+  };
+  // 10 m past the outer face and 12 m along the ribbon. The chase ray through
+  // the glass misses this box; the lot disc does not.
+  const ox = x + sx * (6 + 10) + fx * 12;
+  const oz = z + sz * (6 + 10) + fz * 12;
+  const tower = {
+    minX: ox - 5,
+    maxX: ox + 5,
+    minZ: oz - 5,
+    maxZ: oz + 5,
+    minH: 1,
+    maxH: 48
+  };
+  assert.equal(canyonGlassWalls([wall], [tower], { eye }).length, 0);
+  assert.equal(canyonGlassWalls([wall], [{ ...tower, minH: 1, maxH: 5 }], { eye }).length, 1);
+  const across = {
+    minX: x - sx * 22 - 4,
+    maxX: x - sx * 22 + 4,
+    minZ: z - sz * 22 - 4,
+    maxZ: z - sz * 22 + 4,
+    minH: 1,
+    maxH: 80
+  };
+  assert.equal(canyonGlassWalls([wall], [across], { eye }).length, 1);
+  const far = {
+    minX: ox + sx * 80 - 5,
+    maxX: ox + sx * 80 + 5,
+    minZ: oz + sz * 80 - 5,
+    maxZ: oz + sz * 80 + 5,
+    minH: 1,
+    maxH: 90
+  };
+  assert.equal(canyonGlassWalls([wall], [far], { eye }).length, 1);
+  const retail = clipCanyonWalls([wall], [tower], { eye, near: 80, sample: 4, minLen: 3.2 });
+  assert.equal(retail.length, 1);
+  assert.ok(retail[0].len > 12);
+});
