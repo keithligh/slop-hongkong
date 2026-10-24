@@ -118,3 +118,41 @@ test('a LandsD footprint hides the canyon stretch it covers and leaves the gap',
   const covered = clipCanyonWalls([wall], [{ minX: -30, maxX: 30, minZ: -30, maxZ: 30 }]);
   assert.equal(covered.length, 0);
 });
+
+test('a LandsD mesh within 80 m of the Des Voeux eye removes the canyon in that disc', () => {
+  const wall = {
+    x: -1.4,
+    z: 29.3,
+    yaw: Math.PI / 2,
+    depth: 8,
+    len: 220,
+    side: 1,
+    rx: 0,
+    rz: 1,
+    dx: 1,
+    dz: 0,
+    raw: 'DES VOEUX ROAD CENTRAL',
+    highway: false,
+    narrow: false
+  };
+  const beside = [{ minX: -4, maxX: 4, minZ: 50, maxZ: 70 }];
+  const untouched = clipCanyonWalls([wall], beside, { sample: 4, minLen: 3.2 });
+  assert.equal(untouched.length, 1);
+  assert.ok(untouched[0].len > 200);
+  const cut = clipCanyonWalls([wall], beside, {
+    eye: { x: -1.4, z: 29.3 },
+    near: 80,
+    sample: 4,
+    minLen: 3.2
+  });
+  assert.ok(cut.length >= 1);
+  assert.ok(cut.every((piece) => Math.hypot(piece.x + 1.4, piece.z - 29.3) > 70));
+  const far = clipCanyonWalls([wall], [{ minX: 400, maxX: 420, minZ: 400, maxZ: 420 }], {
+    eye: { x: -1.4, z: 29.3 },
+    near: 80,
+    sample: 4,
+    minLen: 3.2
+  });
+  assert.equal(far.length, 1);
+  assert.ok(far[0].len > 200);
+});

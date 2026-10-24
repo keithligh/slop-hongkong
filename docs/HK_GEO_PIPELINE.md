@@ -178,7 +178,7 @@ The full extract and the sample coast report the same shores: Victoria Harbour 1
 
 ### Boot
 
-`js/geo-source.js` always exports the Hong Kong module. `resolveRuntimeCity` returns `'hk'`. A `?city=` query and `GEO_CITY` do not switch the page. Node tool runs still accept `hk`, `hongkong`, and `hong-kong` for `GEO_CITY` when rebuilding data. The map paints `GEO.harbour.rings` in the pond colour before the land fill, so the shores cover overlap. The existing water plane stays. `buildLandmarks` calls `buildHkLandmarks`. Named Central places sit on their LandsD footprints or the Central Star Ferry pier. Victoria Peak and the Tsim Sha Tsui clock stay unbuilt. `buildCityBlocks` extrudes the Central core only (below), except the Bank of China Tower shaft, which the landmark prisms replace.
+`js/geo-source.js` always exports the Hong Kong module. `resolveRuntimeCity` returns `'hk'`. A `?city=` query and `GEO_CITY` do not switch the page. Node tool runs still accept `hk`, `hongkong`, and `hong-kong` for `GEO_CITY` when rebuilding data. The map paints `GEO.harbour.rings` in the pond colour before the land fill, so the shores cover overlap. The existing water plane stays. `buildLandmarks` calls `buildHkLandmarks`. Named Central places sit on their LandsD footprints or the Central Star Ferry pier. Victoria Peak and the Tsim Sha Tsui clock stay unbuilt. `buildCityBlocks` extrudes the Central core only (below), except the Bank of China Tower shaft. That shaft stays the triangular mesh on the LandsD footprint, skinned with the same shopfront and curtain materials as the other extrudes. An individualised glTF that covers the plate replaces the prism; the square extrude is not drawn either way.
 
 ### Central core buildings
 

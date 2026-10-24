@@ -1,8 +1,12 @@
 import {
+  BLOCKS,
   HK_CORE_WORLD,
   HK_GLTF_CAP,
   HK_GLTF_SHEET,
   HK_GLTF_SHEETS,
+  HK_GLTF_TEX_NEAR,
+  HK_STREET_EYE,
+  HK_STREET_NEAR,
   ISLAND_BOUNDS,
   blockInHkCore,
   hkCoreProject,
@@ -199,7 +203,55 @@ function intersectsCore(entry, core) {
   return entry.maxX >= core.minX && entry.minX <= core.maxX && entry.maxZ >= core.minZ && entry.minZ <= core.maxZ;
 }
 
-export function planGltfManifest(manifest, { cap = HK_GLTF_CAP, minSpan = HK_GLTF_MIN_SPAN, core = HK_CORE_WORLD } = {}) {
+export function boxClosestDistance(box, eye) {
+  if (!box || !eye) return Infinity;
+  const x = Math.max(box.minX, Math.min(eye.x, box.maxX));
+  const z = Math.max(box.minZ, Math.min(eye.z, box.maxZ));
+  return Math.hypot(x - eye.x, z - eye.z);
+}
+
+export function footprintOverlapRatio(block, mesh, margin = 2) {
+  if (!block || !mesh) return 0;
+  const minX = Math.max(block.minX, mesh.minX - margin);
+  const maxX = Math.min(block.maxX, mesh.maxX + margin);
+  const minZ = Math.max(block.minZ, mesh.minZ - margin);
+  const maxZ = Math.min(block.maxZ, mesh.maxZ + margin);
+  const iw = maxX - minX;
+  const iz = maxZ - minZ;
+  if (iw <= 0 || iz <= 0) return 0;
+  const blockArea = Math.max(1, (block.maxX - block.minX) * (block.maxZ - block.minZ));
+  const meshArea = Math.max(1, (mesh.maxX - mesh.minX) * (mesh.maxZ - mesh.minZ));
+  return (iw * iz) / Math.min(blockArea, meshArea);
+}
+
+export function gltfCoversFootprint(block, meshes, margin = 2) {
+  if (!block || !meshes?.length) return false;
+  return meshes.some((mesh) => footprintOverlapRatio(block, mesh, margin) >= 0.15);
+}
+
+// 0 keeps the file's native edge (LandsD facade JPEGs are 4096). Farther masses may drop to 2048.
+export const HK_GLTF_FAR_TEX = 2048;
+
+export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
+  if (!entry) return HK_GLTF_FAR_TEX;
+  return boxClosestDistance(entry, eye) <= near ? 0 : HK_GLTF_FAR_TEX;
+}
+
+function bankOfChinaPins() {
+  const pins = [];
+  for (const block of BLOCKS) {
+    if (block?.name === 'Bank of China Tower' && block.height === 303.3) pins.push(block);
+  }
+  return pins;
+}
+
+export function planGltfManifest(manifest, {
+  cap = HK_GLTF_CAP,
+  minSpan = HK_GLTF_MIN_SPAN,
+  core = HK_CORE_WORLD,
+  eye = HK_STREET_EYE,
+  pins = null
+} = {}) {
   const buildings = Array.isArray(manifest?.buildings) ? manifest.buildings : [];
   let skippedSpeck = 0;
   let skippedOutside = 0;
@@ -213,12 +265,19 @@ export function planGltfManifest(manifest, { cap = HK_GLTF_CAP, minSpan = HK_GLT
       skippedOutside++;
       continue;
     }
-    const cx = (entry.minX + entry.maxX) / 2;
-    const cz = (entry.minZ + entry.maxZ) / 2;
-    masses.push({ ...entry, dist: Math.hypot(cx, cz) });
+    masses.push({ ...entry, dist: boxClosestDistance(entry, eye) });
   }
-  masses.sort((a, b) => a.dist - b.dist);
-  const selected = masses.slice(0, cap).map(({ dist, ...entry }) => entry);
+  const pinBoxes = pins || bankOfChinaPins();
+  const pinned = [];
+  const rest = [];
+  for (const entry of masses) {
+    if (pinBoxes.some((pin) => footprintOverlapRatio(pin, entry, 2) >= 0.15)) pinned.push(entry);
+    else rest.push(entry);
+  }
+  const byDist = (a, b) => a.dist - b.dist || (b.span - a.span);
+  pinned.sort(byDist);
+  rest.sort(byDist);
+  const selected = pinned.concat(rest).slice(0, cap).map(({ dist, ...entry }) => entry);
   return {
     sheet: manifest?.sheet || '',
     reason: manifest?.reason || '',
@@ -229,27 +288,20 @@ export function planGltfManifest(manifest, { cap = HK_GLTF_CAP, minSpan = HK_GLT
   };
 }
 
-export function hiddenExtrudeIds(blocks, meshes, { margin = 2 } = {}) {
+export function hiddenExtrudeIds(blocks, meshes, {
+  margin = 2,
+  eye = HK_STREET_EYE,
+  near = HK_STREET_NEAR
+} = {}) {
+  const list = meshes || [];
+  const killNear = list.some((mesh) => boxClosestDistance(mesh, eye) <= near);
   const ids = [];
   for (const block of blocks) {
     if (block.park > 0.6 || block.median) continue;
     if (!blockInHkCore(block)) continue;
     if (!(hkFootprintHeight(block) > 0)) continue;
-    const blockArea = Math.max(1, (block.maxX - block.minX) * (block.maxZ - block.minZ));
-    for (const mesh of meshes) {
-      const minX = Math.max(block.minX, mesh.minX - margin);
-      const maxX = Math.min(block.maxX, mesh.maxX + margin);
-      const minZ = Math.max(block.minZ, mesh.minZ - margin);
-      const maxZ = Math.min(block.maxZ, mesh.maxZ + margin);
-      const iw = maxX - minX;
-      const iz = maxZ - minZ;
-      if (iw <= 0 || iz <= 0) continue;
-      const meshArea = Math.max(1, (mesh.maxX - mesh.minX) * (mesh.maxZ - mesh.minZ));
-      if ((iw * iz) / Math.min(blockArea, meshArea) >= 0.15) {
-        ids.push(block.id);
-        break;
-      }
-    }
+    const nearField = killNear && boxClosestDistance(block, eye) <= near;
+    if (nearField || gltfCoversFootprint(block, list, margin)) ids.push(block.id);
   }
   return ids;
 }
@@ -288,7 +340,8 @@ export function formatGltfLog(info) {
     `(speck ${info.skippedSpeck} outside ${info.skippedOutside} cap ${info.skippedCap}); ` +
     `extrudes hidden ${info.hidden}; ` +
     `transform EPSG:2326 HK1980 grid → WGS84 (−5.5″ lat, +8.8″ lon) → Central ENU; ` +
-    `y snaps min HKPD to sidewalk ${info.sidewalk}m`;
+    `y snaps min HKPD to sidewalk ${info.sidewalk}m; ` +
+    `street eye ${HK_STREET_EYE.x},${HK_STREET_EYE.z} hides procedural within ${HK_STREET_NEAR}m when a LandsD mesh is inside that disc`;
 }
 
 export { HK_GLTF_MIN_SPAN };

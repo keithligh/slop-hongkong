@@ -1297,7 +1297,7 @@ function createLaneStripeMaterial(hex) {
   const tint = color(hex);
   mat.colorNode = Fn(() => {
     const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z));
-    return tint.mul(mix(float(1.0), float(0.7), max(wet.y, wet.z.mul(0.8))));
+    return tint.mul(mix(float(1.0), float(0.9), max(wet.y, wet.z.mul(0.45))));
   })();
   mat.roughnessNode = Fn(() => {
     const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z));

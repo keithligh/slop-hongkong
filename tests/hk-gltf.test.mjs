@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, ISLAND_BOUNDS } from '../js/city-config.js';
+import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import {
   assertSheetAllowed,
   boundsFromGltf,
   chooseCentralSheet,
   formatGltfLog,
+  gltfTextureMaxEdge,
   hiddenExtrudeIds,
   hk80GridToHk80Geog,
   hk80GridToWgs84,
@@ -116,7 +117,7 @@ test('BUILDING glTF paths are the individualised models, not terrain or generic'
 test('the manifest keeps Central masses up to the street cap and hides overlapping extrudes', () => {
   assert.equal(HK_GLTF_SHEET, '11-SW-9C');
   assert.deepEqual(HK_GLTF_SHEETS, ['11-SW-9C', '11-SW-8D']);
-  assert.equal(HK_GLTF_CAP, 80);
+  assert.equal(HK_GLTF_CAP, 200);
   const manifest = {
     sheet: '11-SW-9A',
     buildings: [
@@ -159,11 +160,11 @@ test('the manifest keeps Central masses up to the street cap and hides overlappi
 test('the page loads the Central street sheets unless a query names one', () => {
   const street = resolveHkGltfRequest('https://x/index.html');
   assert.deepEqual(street.sheets, ['11-SW-9C', '11-SW-8D']);
-  assert.equal(street.cap, 80);
+  assert.equal(street.cap, 200);
   assert.equal(resolveHkGltfRequest('https://x/index.html', { configured: '', sheets: [] }), null);
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A').sheet, '11-SW-9A');
   assert.deepEqual(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A').sheets, ['11-SW-9A']);
-  assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A').cap, 80);
+  assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A').cap, 200);
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A&gltfCap=2').cap, 2);
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=manhattan'), null);
   assert.equal(resolveHkGltfRequest('https://x/index.html', { configured: '11-SW-9B', sheets: [] }).sheet, '11-SW-9B');
@@ -189,4 +190,59 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.match(script, /11-SW-9C/);
   assert.match(script, /11-SW-8D/);
   assert.match(script, /subsetStreetSheet/);
+  const gltfJs = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(gltfJs, /gltfTextureMaxEdge/);
+  assert.match(gltfJs, /anisotropy = 16/);
+  assert.match(gltfJs, /-1\.25/);
+  assert.match(gltfJs, /\.bias\(float\(bias\)\)/);
+  assert.doesNotMatch(gltfJs, /limitPhoto\(mat\.map\)/);
+});
+
+test('Des Voeux eye ranks ahead of a mass closer to the origin, and full-res stops at 120 m', () => {
+  const plan = planGltfManifest({
+    sheet: '11-SW-9C',
+    buildings: [
+      { file: 'origin.gltf', name: 'origin', minX: -8, maxX: 8, minZ: -16, maxZ: 4, minH: 4, maxH: 80, span: 20 },
+      { file: 'street.gltf', name: 'street', minX: -12, maxX: 10, minZ: 18, maxZ: 40, minH: 4, maxH: 40, span: 22 }
+    ]
+  }, { cap: 1, pins: [] });
+  assert.equal(plan.selected[0].name, 'street');
+  assert.equal(plan.skippedCap, 1);
+  assert.equal(gltfTextureMaxEdge({ minX: -2, maxX: 2, minZ: 28, maxZ: 32 }), 0);
+  assert.equal(gltfTextureMaxEdge({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 }), 2048);
+  assert.equal(HK_STREET_EYE.x, -1.4);
+  assert.equal(HK_STREET_EYE.z, 29.3);
+});
+
+test('a LandsD mesh inside 80 m hides every procedural footprint in that disc', () => {
+  const mesh = { minX: -6, maxX: 8, minZ: 22, maxZ: 38, span: 16 };
+  const hidden = hiddenExtrudeIds([
+    { id: 10, height: 30, minX: 30, maxX: 42, minZ: 22, maxZ: 34, cx: 36, cz: 28 },
+    { id: 11, height: 30, minX: 190, maxX: 210, minZ: 10, maxZ: 30, cx: 200, cz: 20 }
+  ], [mesh]);
+  assert.deepEqual(hidden, [10]);
+});
+
+test('the Bank of China Tower mesh is pinned ahead of a nearer street face', () => {
+  const boc = hkResolveLandmarks().placed.find((site) => site.id === 'boc').block;
+  const span = Math.max(boc.maxX - boc.minX, boc.maxZ - boc.minZ);
+  const plan = planGltfManifest({
+    sheet: '11-SW-9C',
+    buildings: [
+      { file: 'street.gltf', name: 'street', minX: -12, maxX: 10, minZ: 18, maxZ: 40, minH: 4, maxH: 40, span: 22 },
+      {
+        file: 'boc.gltf',
+        name: 'boc-mesh',
+        minX: boc.minX - 1,
+        maxX: boc.maxX + 1,
+        minZ: boc.minZ - 1,
+        maxZ: boc.maxZ + 1,
+        minH: 5,
+        maxH: 300,
+        span
+      }
+    ]
+  }, { cap: 1 });
+  assert.equal(plan.selected[0].name, 'boc-mesh');
+  assert.ok(plan.selected[0].minX < boc.cx && plan.selected[0].maxX > boc.cx);
 });

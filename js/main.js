@@ -81,7 +81,7 @@ async function initApp() {
   markInit('cityGrid');
   const boroughs = buildBoroughs(scene, { sidewalks: cityGrid.sidewalks });
   markInit('boroughs');
-  const { colliders: landmarkColliders } = buildLandmarks(scene);
+  const { colliders: landmarkColliders } = buildLandmarks(scene, gltfPlan);
   markInit('landmarks');
   const cityBlocks = buildCityBlocks(scene, gltfPlan);
   markInit('blocks');
@@ -119,7 +119,8 @@ async function initApp() {
     }
   } catch { /* Missing or unavailable storage does not prevent playing. */ }
 
-  // Street proof: index.html?at=-1.4,29.3,1.29 stands on Des Voeux looking east.
+  // Street proof is the person chase at eye height. A flyover frame is not acceptance.
+  // index.html?at=-1.4,29.3,1.29 stands on Des Voeux looking east.
   try {
     const at = new URL(window.location.href).searchParams.get('at');
     if (at) {

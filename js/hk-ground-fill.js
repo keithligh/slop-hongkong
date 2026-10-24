@@ -244,10 +244,15 @@ export function planHkStreetCanyon({
   return { walls };
 }
 
-// Drop the parts of an invented street wall that sit on a real LandsD mesh.
-// `meshes` are world AABBs. A sample on the wall centreline inside a mesh (plus margin) is covered.
-export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen = 3.2 } = {}) {
+function boxClosestDistance(box, eye) {
+  const x = Math.max(box.minX, Math.min(eye.x, box.maxX));
+  const z = Math.max(box.minZ, Math.min(eye.z, box.maxZ));
+  return Math.hypot(x - eye.x, z - eye.z);
+}
+
+export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen = 3.2, eye = null, near = 80 } = {}) {
   if (!meshes?.length) return (walls || []).slice();
+  const killNear = !!(eye && meshes.some((mesh) => boxClosestDistance(mesh, eye) <= near));
   const out = [];
   for (const wall of walls || []) {
     if (!wall || !Number.isFinite(wall.dx) || !Number.isFinite(wall.dz) || !(wall.len > 0)) {
@@ -262,10 +267,12 @@ export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen 
       const t = -half + (i + 0.5) * dt;
       const x = wall.x + wall.dx * t;
       const z = wall.z + wall.dz * t;
-      covered.push(meshes.some((mesh) => (
+      const inMesh = meshes.some((mesh) => (
         x >= mesh.minX - margin && x <= mesh.maxX + margin
         && z >= mesh.minZ - margin && z <= mesh.maxZ + margin
-      )));
+      ));
+      const inEye = killNear && Math.hypot(x - eye.x, z - eye.z) <= near;
+      covered.push(inMesh || inEye);
     }
     let i = 0;
     while (i < steps) {

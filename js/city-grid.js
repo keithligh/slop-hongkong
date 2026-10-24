@@ -8,7 +8,9 @@ import {
   BLOCKS,
   ROADS,
   HK_CORE_WORLD,
-  HK_RETAIL_BELT
+  HK_RETAIL_BELT,
+  HK_STREET_EYE,
+  HK_STREET_NEAR
 } from './city-config.js';
 import {
   createCurbMaterial,
@@ -155,9 +157,9 @@ function buildHkRoadRibbons(group, roadMat, sidewalkMat) {
   }
   addHkRibbonMesh(group, asphaltMat, deck.asphalt, 0.02, 0.055, 'HkRoadCentrelines', 1);
   if (sidewalkMat) addHkRibbonMesh(group, sidewalkMat, deck.sidewalks, 0.02, 0.2, 'HkSidewalks', 1);
-  addHkRibbonMesh(group, curbMat, deck.curbs, 0.02, 0.15, 'HkCurbs', 2);
-  addHkRibbonMesh(group, whiteMat, white, 0.08, 0.018, 'HkLaneMarkingsWhite', 3);
-  addHkRibbonMesh(group, yellowMat, yellow, 0.082, 0.018, 'HkLaneMarkingsYellow', 3);
+  addHkRibbonMesh(group, curbMat, deck.curbs, 0.02, 0.2, 'HkCurbs', 2);
+  addHkRibbonMesh(group, whiteMat, white, 0.078, 0.03, 'HkLaneMarkingsWhite', 3);
+  addHkRibbonMesh(group, yellowMat, yellow, 0.08, 0.03, 'HkLaneMarkingsYellow', 3);
   const graphLinks = GEO.roadGraph && GEO.roadGraph.links ? GEO.roadGraph.links.length : 0;
   console.info(
     `[roads] HK asphalt ${deck.asphalt.length} sidewalks ${deck.sidewalks.length} ` +
@@ -212,7 +214,11 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
     core: HK_CORE_WORLD,
     island: HONG_KONG_ISLAND_COASTLINE
   });
-  const walls = clipCanyonWalls(plan.walls, gltfPlan?.selected || []);
+  const gltfMeshes = gltfPlan?.selected || [];
+  const walls = clipCanyonWalls(plan.walls, gltfMeshes, gltfMeshes.length ? {
+    eye: HK_STREET_EYE,
+    near: HK_STREET_NEAR
+  } : {});
   const retailMat = createRetailPodiumMaterial();
   const wallMat = createCurtainWallMaterial({
     glassTint: 0x1c3a45,

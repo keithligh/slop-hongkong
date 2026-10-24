@@ -93,9 +93,13 @@ test('Bank of China corners stay on its LandsD footprint and only that shaft is 
   const landmarks = readFileSync(path.join(root, 'js/landmarks.js'), 'utf8');
   const bocSrc = landmarks.slice(landmarks.indexOf('function addBankOfChina'), landmarks.indexOf('function addJardine'));
   assert.match(bocSrc, /const ySkirt = HK_RETAIL_BELT/);
+  assert.match(bocSrc, /createRetailPodiumMaterial\(\)/);
+  assert.match(bocSrc, /createCurtainWallMaterial\(/);
   assert.match(bocSrc, /addPrism\(group, skirt, a, b, center, ground, ground, ground, ySkirt, ySkirt, ySkirt\)/);
   assert.match(bocSrc, /addPrism\(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter\)/);
   assert.doesNotMatch(bocSrc, /const y0 = ground/);
+  assert.doesNotMatch(bocSrc, /0xc5d5e4/);
+  assert.doesNotMatch(bocSrc, /metalness: 0\.64/);
   const jardine = landmarks.slice(landmarks.indexOf('function addJardine'), landmarks.indexOf('function addCourtDome'));
   assert.match(jardine, /HK_RETAIL_BELT \+ 1\.2/);
 });
@@ -104,10 +108,11 @@ test('boot builds Hong Kong landmarks and does not call the NYC landmark builder
   const landmarks = readFileSync(path.join(root, 'js/landmarks.js'), 'utf8');
   const boot = landmarks.slice(landmarks.indexOf('function buildLandmarks'));
   const hk = landmarks.slice(landmarks.indexOf('function buildHkLandmarks'), landmarks.indexOf('function buildLandmarks'));
-  assert.match(boot, /return buildHkLandmarks\(scene\)/);
+  assert.match(boot, /return buildHkLandmarks\(scene, gltfPlan\)/);
   assert.match(hk, /HongKongLandmarks/);
+  assert.match(hk, /gltfCoversFootprint/);
   const main = readFileSync(path.join(root, 'js/main.js'), 'utf8');
-  assert.match(main, /buildLandmarks\(scene\)/);
+  assert.match(main, /buildLandmarks\(scene, gltfPlan\)/);
   const buildings = readFileSync(path.join(root, 'js/buildings.js'), 'utf8');
   const body = buildings.slice(buildings.indexOf('function buildHkFootprintBlocks'), buildings.indexOf('function buildCityBlocks'));
   assert.match(body, /hkLandmarkOwnsShaft/);

@@ -45,7 +45,7 @@ test('Hong Kong boot builds landmarks from the Hong Kong catalog', () => {
   const landmarks = read('js/landmarks.js');
   const boot = landmarks.indexOf('function buildLandmarks');
   assert.ok(boot > 0);
-  assert.match(landmarks.slice(boot), /return buildHkLandmarks\(scene\)/);
+  assert.match(landmarks.slice(boot), /return buildHkLandmarks\(scene, gltfPlan\)/);
   assert.match(landmarks, /HongKongLandmarks/);
 });
 

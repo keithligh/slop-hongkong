@@ -71,27 +71,27 @@ export function markingLayout({ width, lanes, dir, length, junctionStart = false
   const laneCount = Math.max(1, Math.round(+lanes) || 1);
   const edge = width * 0.5 - 0.62;
   if (edge > 0.4) {
-    marks.push(stripe('edge', 'white', edge, 0.16, 0.6, length - 0.6));
-    marks.push(stripe('edge', 'white', -edge, 0.16, 0.6, length - 0.6));
+    marks.push(stripe('edge', 'white', edge, 0.22, 0.6, length - 0.6));
+    marks.push(stripe('edge', 'white', -edge, 0.22, 0.6, length - 0.6));
   }
   if (isTwoWay(dir)) {
-    marks.push(stripe('centre', 'yellow', 0.16, 0.12, 0.4, length - 0.4));
-    marks.push(stripe('centre', 'yellow', -0.16, 0.12, 0.4, length - 0.4));
+    marks.push(stripe('centre', 'yellow', 0.16, 0.15, 0.4, length - 0.4));
+    marks.push(stripe('centre', 'yellow', -0.16, 0.15, 0.4, length - 0.4));
     const perSide = Math.max(1, Math.round(laneCount / 2));
     if (perSide >= 2) {
       for (let i = 1; i < perSide; i++) {
         const off = (i / perSide) * (width * 0.5 - 0.9);
-        marks.push(stripe('lane', 'white', off, 0.15, 0, length, 9));
-        marks.push(stripe('lane', 'white', -off, 0.15, 0, length, 9));
+        marks.push(stripe('lane', 'white', off, 0.18, 0, length, 9));
+        marks.push(stripe('lane', 'white', -off, 0.18, 0, length, 9));
       }
     }
   } else if (laneCount >= 2) {
     for (let i = 1; i < laneCount; i++) {
       const off = -width * 0.5 + (i * width) / laneCount;
-      marks.push(stripe('lane', 'white', off, 0.16, 0, length, 9));
+      marks.push(stripe('lane', 'white', off, 0.18, 0, length, 9));
     }
   } else {
-    marks.push(stripe('lane', 'white', 0, 0.15, 0, length, 9));
+    marks.push(stripe('lane', 'white', 0, 0.18, 0, length, 9));
   }
   const stopW = Math.max(1.2, width - 1.5);
   if (junctionEnd) marks.push(across('stop', 'white', stopW, length - 1.05, length - 0.45));

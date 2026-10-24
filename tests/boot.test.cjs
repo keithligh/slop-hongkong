@@ -32,7 +32,7 @@ test('Hong Kong boot builders stay on the harbour, landmark, and Central footpri
   assert.match(boroughsSrc, /function ridgeHeightAt\(\) \{\n  return 0;\n\}/);
   assert.match(boroughsSrc, /group\.name = 'Boroughs'/);
   const landmarks = read('js/landmarks.js');
-  assert.match(landmarks, /function buildLandmarks\(scene\) \{\n  return buildHkLandmarks\(scene\);\n\}/);
+  assert.match(landmarks, /function buildLandmarks\(scene, gltfPlan = null\) \{\n  return buildHkLandmarks\(scene, gltfPlan\);\n\}/);
   assert.match(landmarks, /HongKongLandmarks/);
   const blocks = read('js/buildings.js');
   assert.match(blocks, /function buildCityBlocks\(scene, gltfPlan = null\) \{\n  return buildHkFootprintBlocks\(scene, gltfPlan\);\n\}/);

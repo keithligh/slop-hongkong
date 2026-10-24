@@ -29,7 +29,7 @@ On MSI, open the page (no query flag). Chase camera:
 ## Residual gaps
 
 - No 5 m DTM. Walls and roads are flat.
-- The canyon ribbon is still the ground-fill wall. Its sidewalk belt is an opaque shopfront, and Traditional Chinese neon hangs on that belt (`docs/HK_GLTF_CUT.md`).
+- The canyon ribbon is still the ground-fill wall outside the Des Voeux eye. Inside 80 m of x = −1.4, z = 29.3 the ribbon is removed when a LandsD individualised mesh is in that disc (`docs/HK_GLTF_CUT.md`). Where a gap wall remains, its sidewalk belt is an opaque shopfront, and Traditional Chinese neon hangs on that belt.
 - Not a parcel cadastre. Where LandsD has a footprint the wall meets it. Where it does not, the wall is a 12 m canyon edge, not a surveyed lot.
 - Block interiors behind the street wall can still be the coast plate. They are not a place the carriageway looks into.
 - Junction mouths stay open for a short distance so crossing decks are not buried.

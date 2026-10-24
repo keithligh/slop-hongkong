@@ -7,6 +7,8 @@ import {
   hkResolveLandmarks,
   hkScaleRing
 } from './city-config.js';
+import { gltfCoversFootprint } from './hk-gltf-frame.js';
+import { createCurtainWallMaterial, createRetailPodiumMaterial } from './tsl-materials.js';
 
 // Named Hong Kong places on LandsD footprints and the Central Star Ferry pier.
 // Victoria Peak and the Tsim Sha Tsui clock stay empty until a later step.
@@ -121,7 +123,7 @@ function addExchange(group, site, bronze, metal, ground) {
   group.add(mast);
 }
 
-function addBankOfChina(group, site, colliders, glass, brace, metal, up, dir, ground) {
+function addBankOfChina(group, site, colliders, up, dir, ground) {
   const block = site.block;
   const corners = hkPlanCorners(block.poly, block.cx, block.cz);
   if (corners.length !== 4) throw new Error(`Bank of China footprint did not resolve to 4 corners (${corners.length})`);
@@ -139,7 +141,24 @@ function addBankOfChina(group, site, colliders, glass, brace, metal, up, dir, gr
   const peak = 11.7;
   const mastH = 52.4;
   const ySkirt = HK_RETAIL_BELT;
-  const skirt = hkMat(0x8a8176, { metalness: 0.04, roughness: 0.9, side: THREE.DoubleSide });
+  // Same shopfront and curtain the other LandsD extrudes use. Not a separate chrome skin.
+  const skirt = createRetailPodiumMaterial();
+  const face = createCurtainWallMaterial({
+    glassTint: 0x1a4d68,
+    frameTint: 0xd5dee6,
+    windowWidth: 2.35,
+    floorHeight: 3.9,
+    litProbability: 0.7,
+    warmth: 0.4,
+    reflectivity: 0.96,
+    seed: 4.2,
+    boxLocal: false
+  });
+  face.polygonOffset = true;
+  face.polygonOffsetFactor = 1;
+  face.polygonOffsetUnits = 1;
+  const braceMat = hkMat(0xd5dee6, { metalness: 0.06, roughness: 0.72 });
+  const mastMat = hkMat(0x8d939a, { metalness: 0.16, roughness: 0.6 });
   for (let step = 0; step < 4; step++) {
     const a = corners[(north + step) % 4];
     const b = corners[(north + step + 1) % 4];
@@ -147,16 +166,12 @@ function addBankOfChina(group, site, colliders, glass, brace, metal, up, dir, gr
     const yOuter = step === 0 ? yTop + peak : yTop;
     const yCenter = yTop;
     addPrism(group, skirt, a, b, center, ground, ground, ground, ySkirt, ySkirt, ySkirt);
-    const face = glass.clone();
-    face.polygonOffset = true;
-    face.polygonOffsetFactor = 1 + step;
-    face.polygonOffsetUnits = 1 + step;
     addPrism(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter);
     const yBrace0 = ground + 12;
     const yBrace1 = yOuter - 6;
     if (yBrace1 - yBrace0 > 20) {
-      addBeam(group, brace, up, dir, a.x, yBrace0, a.z, b.x, yBrace1, b.z, 1.15);
-      addBeam(group, brace, up, dir, b.x, yBrace0, b.z, a.x, yBrace1, a.z, 1.15);
+      addBeam(group, braceMat, up, dir, a.x, yBrace0, a.z, b.x, yBrace1, b.z, 1.15);
+      addBeam(group, braceMat, up, dir, b.x, yBrace0, b.z, a.x, yBrace1, a.z, 1.15);
     }
     if (step === 0) {
       const mx = (a.x + b.x) / 2;
@@ -165,7 +180,7 @@ function addBankOfChina(group, site, colliders, glass, brace, metal, up, dir, gr
       const ox = ((b.x - a.x) / el) * 2.2;
       const oz = ((b.z - a.z) / el) * 2.2;
       for (const sign of [-1, 1]) {
-        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.55, mastH, 6), metal);
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.55, mastH, 6), mastMat);
         mast.position.set(mx + ox * sign, yOuter + mastH / 2, mz + oz * sign);
         mast.castShadow = true;
         group.add(mast);
@@ -290,15 +305,14 @@ function addPeakTram(group, site, colliders, green, ground) {
   });
 }
 
-function buildHkLandmarks(scene) {
+function buildHkLandmarks(scene, gltfPlan = null) {
   const { placed, deferred } = hkResolveLandmarks();
+  const gltfMeshes = gltfPlan?.selected || [];
   const group = new THREE.Group();
   group.name = 'HongKongLandmarks';
   const colliders = [];
   const ground = ISLAND_BOUNDS.sidewalkHeight;
   const glass = hkMat(0xd5dee8, { metalness: 0.72, roughness: 0.14 });
-  const bocGlass = hkMat(0xc5d5e4, { metalness: 0.64, roughness: 0.16, side: THREE.DoubleSide });
-  const brace = hkMat(0xf4f1ea, { metalness: 0.28, roughness: 0.48 });
   const metal = hkMat(0xb7c0c8, { metalness: 0.8, roughness: 0.22 });
   const bronze = hkMat(0x8d7350, { metalness: 0.55, roughness: 0.38 });
   const porthole = hkMat(0x12181e, { metalness: 0.15, roughness: 0.35 });
@@ -318,7 +332,11 @@ function buildHkLandmarks(scene) {
         addOneIfc(group, site, glass, ground);
         break;
       case 'boc':
-        addBankOfChina(group, site, colliders, bocGlass, brace, metal, up, dir, ground);
+        // Individualised GLTF already carries the LandsD photograph. The prism is only
+        // the footprint fallback, and it uses the extrude shopfront and curtain, not a toy skin.
+        if (!gltfCoversFootprint(site.block, gltfMeshes)) {
+          addBankOfChina(group, site, colliders, up, dir, ground);
+        }
         break;
       case 'exchange':
         addExchange(group, site, bronze, metal, ground);
@@ -349,8 +367,8 @@ function buildHkLandmarks(scene) {
   return { group, colliders };
 }
 
-function buildLandmarks(scene) {
-  return buildHkLandmarks(scene);
+function buildLandmarks(scene, gltfPlan = null) {
+  return buildHkLandmarks(scene, gltfPlan);
 }
 
 export { buildLandmarks };

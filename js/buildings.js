@@ -178,8 +178,9 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
       continue;
     }
     if (hkLandmarkOwnsShaft(b)) {
-      // Bank of China is four triangular prisms. A full-height square plate would
-      // hide that silhouette, so landmarks.js builds this one shaft.
+      // Bank of China Tower is the triangular mesh on its LandsD corners (landmarks.js),
+      // or the individualised glTF when that mesh covers the plate. A square extrude
+      // would hide either one.
       skippedOwned++;
       continue;
     }

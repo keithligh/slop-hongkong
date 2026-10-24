@@ -232,7 +232,12 @@ const HK_NULL_HEIGHT = 'skip';
 // A missing manifest leaves the extrude fallback in place.
 const HK_GLTF_SHEETS = Object.freeze(['11-SW-9C', '11-SW-8D']);
 const HK_GLTF_SHEET = HK_GLTF_SHEETS[0];
-const HK_GLTF_CAP = 80;
+// Des Voeux eye for street proof and for which individualised meshes load first.
+// Person chase, heading 1.29 rad, looking east along the carriageway. A flyover is not this camera.
+const HK_STREET_EYE = Object.freeze({ x: -1.4, z: 29.3, heading: 1.29 });
+const HK_STREET_NEAR = 80;
+const HK_GLTF_TEX_NEAR = 120;
+const HK_GLTF_CAP = 200;
 
 function hkCoreScale() {
   const lat0 = GEO.frame.lat0;
@@ -999,6 +1004,9 @@ export {
   HK_GLTF_SHEET,
   HK_GLTF_SHEETS,
   HK_GLTF_CAP,
+  HK_STREET_EYE,
+  HK_STREET_NEAR,
+  HK_GLTF_TEX_NEAR,
   blockInHkCore,
   hkCoreProject,
   hkCoreUnproject,

@@ -27,30 +27,36 @@ That command downloads both zips and keeps every Central BUILDING glTF with span
 
 ## What the page does
 
-`HK_GLTF_SHEETS` is `11-SW-9C` and `11-SW-8D`. Boot loads both manifests, keeps masses with span ≥ 8 m inside the core, and mounts the nearest 80. `?gltf=11-SW-9A` still loads a single sheet. `?gltfCap=` overrides the handful, up to 800.
+`HK_GLTF_SHEETS` is `11-SW-9C` and `11-SW-8D`. Boot loads both manifests, keeps masses with span ≥ 8 m inside the core, and mounts the nearest 200. Distance is the closest point on the mesh box to the Des Voeux eye (x = −1.4, z = 29.3), not the distance to the Statue Square origin. A mesh that overlaps the Bank of China Tower footprint is pinned into that set so a nearer harbour block cannot drop it. `?gltf=11-SW-9A` still loads a single sheet. `?gltfCap=` overrides the handful, up to 800.
 
-A footprint whose box overlaps a loaded mesh (intersection at least 15% of the smaller box, 2 m margin) is left out of the extrude batch. A canyon wall is cut out wherever its centreline runs through a loaded mesh (3 m margin). The pieces that remain are gap fill.
+A footprint whose box overlaps a loaded mesh (intersection at least 15% of the smaller box, 2 m margin) is left out of the extrude batch. When any loaded mesh itself sits inside 80 m of the Des Voeux eye, every extrude whose box is inside that same 80 m disc is left out too, overlap or not. A canyon wall is cut out wherever its centreline runs through a loaded mesh (3 m margin), and the same 80 m disc drops the canyon ribbon when a LandsD mesh is inside it. The pieces that remain are gap fill outside that street disc.
 
 Street-level glass is forced off in four places. None of them repaint a LandsD photograph.
 
 1. Geometry. Canyon ribbons and LandsD extrudes are split at `HK_RETAIL_BELT` (sidewalk + two 3.9 m storeys, world y = 8.02). The lower mesh is `HkRetailPodium`: granite plinth to about 1.2 m, a dark shop mouth above the plinth, a tile fascia. No punched window sits in that belt.
 2. Massing podium. A wide plate’s lower block (`style: 'podium'`) uses `hkPodiumMasonry`, ashlar with punched openings only above the belt. `HkCurtainWall` is only the setback tower (`tower0`–`tower2`). Tower glass therefore starts above the podium, not at the sidewalk.
 3. Shader backstop. `createCurtainWallMaterial` with `boxLocal: false` replaces colour, roughness, metalness, mullion normal, and pane emission wherever `positionWorld.y < HK_RETAIL_BELT`. A missed split still cannot draw a curtain grid to the pavement. Box-local facade tests are unchanged.
-4. Landmarks the extrude batch does not own. Bank of China prisms are stone from the sidewalk to the belt; the glass faces start at `ySkirt`. Jardine portholes start at or above the belt.
+4. Landmarks the extrude batch does not own. The Bank of China Tower stays on its LandsD corners (four triangles, real plate, real height steps). Its skirt is `HkRetailPodium` and its faces are the same curtain material as the other extrudes. There is no separate chrome prism skin. When an individualised mesh covers that footprint, the prism is not drawn: the photograph is the facade. Jardine portholes start at or above the belt.
 
-Photo materials on the glTF keep the file’s roughness and metalness. The page scales a photo map above 2048 px down to 2048 px so a block of 4K atlases can sit in the GPU; the cached JPEGs are untouched.
+Photo materials on the glTF keep the file’s roughness and metalness. A mesh whose box is within 120 m of the Des Voeux eye keeps the JPEG’s native edge (the LandsD atlases are 4096²). Farther maps still drop to 2048 px. Every photo map is sampled at anisotropy 16. Street-near maps use a LOD bias of −1.25 so an eye-height view stays on a sharp mip instead of the muddy one. The cached JPEGs are untouched.
 
 Neon boards and a second fascia row hang on canyon faces that are still gaps, on that shopfront belt (sign tops stay under y = 8.02). Des Voeux is the densest. Copy is Traditional Chinese. Highways get none. Signs are not parented to the tower glass.
 
 ## Camera
 
-Street level on Des Voeux, looking east along the road:
+Street proof is the person chase at eye height. A helicopter or flyover frame is not acceptance.
+
+| View | x | z | heading (rad) |
+| --- | --- | --- | --- |
+| Des Voeux eye, looking east | −1.4 | 29.3 | 1.29 |
+| 25 m along that look | 22.6 | 36.2 | 1.29 |
+| South side of the same station | −1.4 | 35.3 | 1.29 |
 
 ```text
 index.html?at=-1.4,29.3,1.29
 ```
 
-Person mode, x = −1.4, z = 29.3, heading 1.29 rad. The 8D mesh around that point is textured LandsD geometry. The invented wall is clipped where that footprint sits. Further east, 9C towers continue the street in the same photo material.
+Person mode, x = −1.4, z = 29.3, heading 1.29 rad. The 8D mesh around that point is textured LandsD geometry at the file resolution. Procedural glass, canyon ribbons, and footprint extrudes inside 80 m of that eye are not drawn when a LandsD mesh is inside the disc. Further east, 9C towers continue the street in the same photo material. The Bank of China Tower, about 230 m east-south of this eye, uses its individualised mesh when that file is in 11-SW-9C or 11-SW-8D, and otherwise the footprint prism with the extrude materials.
 
 ## Placement
 
@@ -61,5 +67,6 @@ glTF node matrices are column-major, Y-up after the node: X = HK1980 easting, Y 
 - 11-SW-8D on disk is the Des Voeux subset (24), not all 781. `--street` is how to cache the rest of the sheet. Buildings further into Sheung Wan stay on the opaque extrude until that cache grows.
 - About a metre of horizontal datum difference versus the LandsD grid API.
 - Snapping each mesh to the sidewalk flattens real steps in HKPD.
-- A mesh that does not share a footprint’s box can leave an extrude beside it, or hide a neighbour when the boxes overlap.
+- A mesh that does not share a footprint’s box can leave an extrude beside it outside the 80 m street disc, or hide a neighbour when the boxes overlap. Inside that disc the extrude is hidden once any LandsD mesh is present, so a gap with no individualised model is empty rather than a glass slab.
+- Full-resolution atlases within 120 m cost more GPU memory than the old 2048 px cap. Farther sheets still downscale.
 - The pinned `GLTFLoader` commit (`5e6eee6ce875`) is three.js `dev` as of 2026-10-24.

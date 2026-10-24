@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { Fn, float, smoothstep, texture, uniform } from 'three/tsl';
-import { hkCentralSignSites } from './city-config.js';
+import { HK_STREET_EYE, HK_STREET_NEAR, hkCentralSignSites } from './city-config.js';
 import { clipCanyonWalls } from './hk-ground-fill.js';
 import { centralCanyonWalls, planHkCanyonNeon } from './hk-neon.js';
 import { cityUniforms } from './tsl-materials.js';
@@ -82,7 +82,10 @@ function createSignTexture(site) {
   paintCanvas(canvas, site);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
+  tex.anisotropy = 16;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
   const record = { canvas, site, tex, clones: [] };
   painted.push(record);
   return record;
@@ -116,7 +119,7 @@ function makeSignMaterial(map, glow) {
   mat.emissiveNode = Fn(() => {
     const night = smoothstep(0.35, 1.3, cityUniforms.uInteriorGlow);
     const gain = float(0.58).add(night.mul(1.25));
-    return texture(map).rgb.mul(gain);
+    return texture(map).bias(float(-0.75)).rgb.mul(gain);
   })();
   mat.toneMapped = false;
   return mat;
@@ -216,7 +219,11 @@ function buildStreetDetails(scene, gltfPlan = null) {
   group.name = 'HongKongStreetDetails';
   const plates = hkCentralSignSites();
   addInstancedSigns(group, plates, false);
-  const walls = clipCanyonWalls(centralCanyonWalls(), gltfPlan?.selected || []);
+  const gltfMeshes = gltfPlan?.selected || [];
+  const walls = clipCanyonWalls(centralCanyonWalls(), gltfMeshes, gltfMeshes.length ? {
+    eye: HK_STREET_EYE,
+    near: HK_STREET_NEAR
+  } : {});
   const neon = planHkCanyonNeon(walls);
   addInstancedSigns(group, neon.signs, true);
   addArms(group, neon.arms);
