@@ -105,8 +105,9 @@ OpenStreetMap keeps the roles it has on the NYC path: coast, water, parks, landm
 - `tools/data/q_hk_landmarks.overpassql` — named landmark footprints
 - `tools/data/q_hk_piers.overpassql` — piers and ferry terminals
 - `tools/data/q_hk_highways.overpassql` — drivable highways for class, lanes, width, oneway, and gaps
+- `tools/data/q_hk_pedestrian.overpassql` — Central core footways, crossings, bus stops, benches, and street lamps. `node tools/build-hk-pedestrian.mjs tools/data/hk/osm_pedestrian.json` rewrites `js/hk-pedestrian-data.js`. The empty sidewalk was this query never being loaded, not a lack of open data. iB1000 pavement-margin lines (CartoPedLine `PA`) are a LandsD survey layer; the page’s ground outside the centreline is the OSM ways above plus the LandsD curb.
 
-`tools/fetch-hk.sh` runs these through `tools/overpass.sh` into `tools/data/hk/osm_*.json` (`osm_highways.json` for the highway query). The NYC queries `q_coast`, `q_cp`, `q_landmarks`, and `q_piers` are unchanged.
+`tools/fetch-hk.sh` runs these through `tools/overpass.sh` into `tools/data/hk/osm_*.json` (`osm_highways.json` for the highway query, `osm_pedestrian.json` for the Central footways). Rebuild the committed pavement module with `node tools/build-hk-pedestrian.mjs tools/data/hk/osm_pedestrian.json`. The NYC queries `q_coast`, `q_cp`, `q_landmarks`, and `q_piers` are unchanged.
 
 ## What the NYC boot path still needs
 
@@ -190,7 +191,7 @@ The visible massing is the Central CBD, not the full Island + Kowloon extract. `
 
 A block is inside when its centroid lies in that box in the world frame (the same local ENU as `tools/geo-frame.mjs`). On the committed module that is 2,021 footprints. 1,943 have a positive `TopHeight - BaseHeight` and are extruded from `poly` with `ExtrudeGeometry` (the same outline path as `createExtrudedPolygonMesh`). 78 have a null height and are skipped (`HK_NULL_HEIGHT = 'skip'`): no stand-in slab and no invented storeys. The other 51,092 footprints are not built. The axis-aligned box stored on an empty `rects` list is not the mesh. Committed tuples do not carry courtyard holes, so a court extrudes as its outer ring.
 
-`index.html` preloads `js/hk-geodata.js`, then `js/geo-source.js`, then `js/city-config.js`, and the rest of the module graph (33 preloads, including `js/hk-gltf-frame.js` and `js/hk-gltf.js`). The atlas module is `js/hk-map.js`. `js/traffic.js` statically imports `js/pedestrian-routes.js`, so that file is preloaded too. The previous 29-count check stopped on the missing `geo-source.js` link and never reached it.
+`index.html` preloads `js/hk-geodata.js`, then `js/geo-source.js`, then `js/city-config.js`, and the rest of the module graph (38 preloads, including `js/hk-gltf-frame.js`, `js/hk-gltf.js`, and `js/hk-pedestrian-data.js`). The atlas module is `js/hk-map.js`. `js/traffic.js` statically imports `js/pedestrian-routes.js`, so that file is preloaded too. The previous 29-count check stopped on the missing `geo-source.js` link and never reached it.
 
 ### Shore helper
 

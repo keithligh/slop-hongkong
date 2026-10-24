@@ -23,6 +23,8 @@ import {
 } from './tsl-materials.js';
 import { GEO } from './geo-source.js';
 import { HK_CANYON_HEIGHT, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
+import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
+import { planHkStreetGround } from './hk-pedestrian.js';
 import { planHkRoadDeck } from './hk-road-deck.js';
 
 // Hong Kong coast, Victoria Harbour, and the centreline asphalt deck. Lots stay in buildings.js.
@@ -250,6 +252,143 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
   }));
 }
 
+function paintStopLabel(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.MeshBasicNodeMaterial({ color: 0xf0c31a, name: 'hkBusStop' });
+  const draw = () => {
+    ctx.fillStyle = '#f0c31a';
+    ctx.fillRect(0, 0, 256, 64);
+    ctx.fillStyle = '#1a1408';
+    let size = 28;
+    ctx.font = `700 ${size}px "Noto Sans TC", sans-serif`;
+    while (size > 14 && ctx.measureText(text).width > 236) {
+      size -= 2;
+      ctx.font = `700 ${size}px "Noto Sans TC", sans-serif`;
+    }
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 34);
+  };
+  draw();
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.MeshBasicNodeMaterial({ map });
+  mat.name = 'hkBusStop';
+  if (document.fonts?.ready) {
+    document.fonts.ready.then(() => {
+      draw();
+      map.needsUpdate = true;
+    });
+  }
+  return mat;
+}
+
+function furniturePose(kind) {
+  switch (kind) {
+    case 'bench':
+      return { w: 0.48, len: 1.35, y: 0.22, h: 0.42 };
+    case 'lamp':
+      return { w: 0.12, len: 0.12, y: 0.22, h: 3.6 };
+    default: {
+      const unknown = kind;
+      throw new Error(`Unhandled street furniture ${unknown}`);
+    }
+  }
+}
+
+// OSM sidewalks, pedestrian areas, zebra crossings, and bus stops.
+// The 2.05 m curb walk stays. This is the mapped pavement outside that strip.
+function buildHkPedestrianGround(group) {
+  const plan = planHkStreetGround(HK_PEDESTRIAN, ROADS);
+  const walkMat = createSidewalkMaterial();
+  walkMat.name = 'hkOsmPavement';
+  walkMat.polygonOffset = true;
+  walkMat.polygonOffsetFactor = -2;
+  walkMat.polygonOffsetUnits = -2;
+  addHkRibbonMesh(group, walkMat, plan.walks, 0.03, 0.19, 'HkOsmPavement', 1);
+  for (const ring of plan.areas) {
+    const mesh = createExtrudedPolygonMesh(ring, 0.03, 0.19, walkMat, true, false);
+    mesh.name = 'HkOsmPedestrianArea';
+    group.add(mesh);
+  }
+  const zebra = createLaneStripeMaterial(0xf4f1e8);
+  zebra.name = 'hkCrossing';
+  addHkRibbonMesh(group, zebra, plan.crossings, 0.09, 0.025, 'HkCrossings', 4);
+
+  const poleMat = new THREE.MeshStandardNodeMaterial({ color: 0x3a4046, roughness: 0.62, metalness: 0.18 });
+  poleMat.name = 'hkBusPole';
+  const roofMat = new THREE.MeshStandardNodeMaterial({ color: 0x2c3338, roughness: 0.7, metalness: 0.08 });
+  roofMat.name = 'hkBusShelter';
+  const benchMat = new THREE.MeshStandardNodeMaterial({ color: 0x6d6256, roughness: 0.78, metalness: 0.04 });
+  benchMat.name = 'hkBench';
+  const lampMat = new THREE.MeshStandardNodeMaterial({ color: 0x4e555c, roughness: 0.55, metalness: 0.22 });
+  lampMat.name = 'hkStreetLamp';
+  const poles = [];
+  const roofs = [];
+  const benches = [];
+  const lamps = [];
+  const colliders = [];
+  const labels = new Map();
+  for (const stop of plan.stops) {
+    poles.push({ x: stop.x, z: stop.z, yaw: 0, w: 0.1, len: 0.1 });
+    if (stop.shelter && !stop.inRoad) {
+      const away = stop.yaw + Math.PI;
+      roofs.push({
+        x: stop.x + Math.sin(away) * 0.55,
+        z: stop.z + Math.cos(away) * 0.55,
+        yaw: stop.roadYaw,
+        w: 1.35,
+        len: 3.1
+      });
+    }
+    if (stop.name && typeof document !== 'undefined') {
+      let mat = labels.get(stop.name);
+      if (!mat) {
+        mat = paintStopLabel(stop.name);
+        labels.set(stop.name, mat);
+      }
+      const sign = new THREE.Mesh(new THREE.BoxGeometry(0.92, 0.36, 0.05), mat);
+      sign.name = 'HkBusStopSign';
+      sign.position.set(stop.x, 2.22, stop.z);
+      sign.rotation.y = stop.yaw;
+      sign.castShadow = true;
+      group.add(sign);
+    }
+    if (!stop.inRoad) {
+      colliders.push({
+        minX: stop.x - 0.35,
+        maxX: stop.x + 0.35,
+        minZ: stop.z - 0.35,
+        maxZ: stop.z + 0.35,
+        maxY: stop.shelter ? 2.7 : 2.4
+      });
+    }
+  }
+  for (const item of plan.furniture) {
+    const pose = furniturePose(item.kind);
+    const slab = { x: item.x, z: item.z, yaw: item.yaw, w: pose.w, len: pose.len };
+    if (item.kind === 'bench') benches.push(slab);
+    else lamps.push(slab);
+  }
+  const poleMesh = addHkRibbonMesh(group, poleMat, poles, 0.22, 2.55, 'HkBusPoles', 2);
+  const roofMesh = addHkRibbonMesh(group, roofMat, roofs, 2.62, 0.08, 'HkBusShelters', 2);
+  if (poleMesh) poleMesh.castShadow = true;
+  if (roofMesh) roofMesh.castShadow = true;
+  const bench = furniturePose('bench');
+  const lamp = furniturePose('lamp');
+  addHkRibbonMesh(group, benchMat, benches, bench.y, bench.h, 'HkBenches', 2);
+  addHkRibbonMesh(group, lampMat, lamps, lamp.y, lamp.h, 'HkStreetLamps', 2);
+  console.info(
+    `[ground] OSM pavement ${plan.walks.length} areas ${plan.areas.length} ` +
+    `crossings ${plan.crossingSites} stops ${plan.stops.length} ` +
+    `(shelter ${roofs.length}) benches ${benches.length} lamps ${lamps.length}`
+  );
+  return colliders;
+}
+
 // Coast rings become land. Carriageways are an asphalt deck on GEO.roads.
 // Victoria Harbour water uses PLAY_BOUNDS (Island + Kowloon + harbour).
 function buildHkCityGrid(scene, gltfPlan = null) {
@@ -301,6 +440,7 @@ function buildHkCityGrid(scene, gltfPlan = null) {
   const sidewalkMat = createSidewalkMaterial();
   const canyonColliders = buildHkStreetCanyon(group, gltfPlan);
   buildHkRoadRibbons(group, roadMat, sidewalkMat);
+  const stopColliders = buildHkPedestrianGround(group);
   buildHkPierDecks(group);
 
   const roadSidewalks = [];
@@ -314,7 +454,7 @@ function buildHkCityGrid(scene, gltfPlan = null) {
   batchStaticGroupMeshes(group, new Set([waterMat, roadMat, sidewalkMat, landMat]));
   scene.add(group);
   console.info(`[ground] HK coast rings ${HONG_KONG_ISLAND_COASTLINE.length}+${KOWLOON_COASTLINE.length} water ${play.minX.toFixed(0)}..${play.maxX.toFixed(0)} x ${play.minZ.toFixed(0)}..${play.maxZ.toFixed(0)}`);
-  return { group, sidewalks: roadSidewalks, footprints: [], highwayLanes: [], colliders: canyonColliders };
+  return { group, sidewalks: roadSidewalks, footprints: [], highwayLanes: [], colliders: [...canyonColliders, ...stopColliders] };
 }
 
 export { buildCityGrid, batchStaticGroupMeshes };
