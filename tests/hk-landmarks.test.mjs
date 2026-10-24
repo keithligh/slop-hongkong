@@ -95,6 +95,10 @@ test('Bank of China corners stay on its LandsD footprint and only that shaft is 
   assert.match(bocSrc, /const ySkirt = HK_RETAIL_BELT/);
   assert.match(bocSrc, /createRetailPodiumMaterial\(\)/);
   assert.match(bocSrc, /createCurtainWallMaterial\(/);
+  assert.match(bocSrc, /glassMetalness: 0/);
+  assert.match(bocSrc, /glassRoughness: 0\.48/);
+  assert.match(bocSrc, /reflectionFloor: 0\.04/);
+  assert.doesNotMatch(bocSrc, /reflectivity: 0\.96/);
   assert.match(bocSrc, /addPrism\(group, skirt, a, b, center, ground, ground, ground, ySkirt, ySkirt, ySkirt\)/);
   assert.match(bocSrc, /addPrism\(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter\)/);
   assert.doesNotMatch(bocSrc, /const y0 = ground/);

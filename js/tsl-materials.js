@@ -496,18 +496,21 @@ function createCurtainWallMaterial(opts = {}) {
     litProbability = 0.36,
     warmth = 0.62,
     reflectivity = 0.92,
+    reflectionFloor = 0.18,
+    glassMetalness = 0.72,
+    glassRoughness = 0.05,
     seed = 1.0,
     boxLocal = false
   } = opts;
 
-  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${seed}_${boxLocal}`;
+  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${reflectionFloor}_${glassMetalness}_${glassRoughness}_${seed}_${boxLocal}`;
   if (_curtainWallCache.has(cacheKey)) {
     return _curtainWallCache.get(cacheKey);
   }
 
   const mat = new THREE.MeshStandardNodeMaterial({
-    metalness: 0.72,
-    roughness: 0.12
+    metalness: glassMetalness,
+    roughness: Math.max(glassRoughness, 0.12)
   });
 
   // The style's parameters are uniforms (not baked-in constants), so every curtain-wall style compiles to one shader
@@ -518,6 +521,9 @@ function createCurtainWallMaterial(opts = {}) {
   const uLitProbability = uniform(litProbability);
   const uWarmth = uniform(warmth);
   const uReflectivity = uniform(reflectivity);
+  const uReflectionFloor = uniform(reflectionFloor);
+  const uGlassMetal = uniform(glassMetalness);
+  const uGlassRough = uniform(glassRoughness);
   const uSeed = uniform(seed);
   const cWarmLight = color(0xffe1a6);
   const cCanyonBounce = color(0xe89c68);
@@ -593,7 +599,7 @@ function createCurtainWallMaterial(opts = {}) {
     const upperGlazed = mix(aptRoom.xyz.mul(color(0xb6c6bf)), cGlass, grime);
     const glazedBase = mix(upperGlazed, shopBase, isGroundFloor);
 
-    const glassColor = mix(glazedBase, envReflection, fresnel.mul(uReflectivity).add(0.18))
+    const glassColor = mix(glazedBase, envReflection, fresnel.mul(uReflectivity).add(uReflectionFloor))
       .add(cityUniforms.uSunColor.mul(sunSpec));
 
     const spandrelDark = cFrame.mul(0.52);
@@ -629,7 +635,7 @@ function createCurtainWallMaterial(opts = {}) {
       filteredPulse(cellUV.x, mullionThickness, 1.0 - mullionThickness, fw.x).mul(filteredPulse(cellUV.y, spandrelRatio, 1.0, fw.y))
     );
     const sillDirt = float(1.0).sub(smoothstep(spandrelRatio, spandrelRatio + 0.18, cellUV.y)).mul(0.18);
-    const glassOrFrame = mix(float(0.05).add(sillDirt), float(0.54), max(max(isFrame, isRoof), partial));
+    const glassOrFrame = mix(uGlassRough.add(sillDirt), float(0.54), max(max(isFrame, isRoof), partial));
     const glassRough = mix(mix(glassOrFrame, float(0.36), coping), float(0.88), blank);
     if (boxLocal) return glassRough;
     const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
@@ -638,7 +644,7 @@ function createCurtainWallMaterial(opts = {}) {
 
   // Glass & metal above the belt. The shopfront is stone, not a metal curtain.
   mat.metalnessNode = Fn(() => {
-    const glassMetal = mix(float(0.72), float(0.0), blank);
+    const glassMetal = mix(uGlassMetal, float(0.0), blank);
     if (boxLocal) return glassMetal;
     const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
     return mix(glassMetal, float(0.02), onPodium);

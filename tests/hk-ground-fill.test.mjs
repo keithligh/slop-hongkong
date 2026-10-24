@@ -156,3 +156,28 @@ test('a LandsD mesh within 80 m of the Des Voeux eye removes the canyon in that 
   assert.equal(far.length, 1);
   assert.ok(far[0].len > 200);
 });
+
+test('a sidewalk ribbon whose outer face hits a LandsD mesh is not drawn over the shopfront', () => {
+  const wall = {
+    x: 0,
+    z: 10,
+    yaw: Math.PI / 2,
+    depth: 10,
+    len: 40,
+    side: 1,
+    rx: 0,
+    rz: 1,
+    dx: 1,
+    dz: 0,
+    raw: 'DES VOEUX ROAD CENTRAL',
+    highway: false,
+    narrow: false
+  };
+  // Centreline at z=10 is outside the lot. The outer face at z=15 bites the mesh.
+  const mesh = [{ minX: -30, maxX: 30, minZ: 14, maxZ: 48 }];
+  assert.equal(clipCanyonWalls([wall], mesh, { sample: 4, margin: 3, minLen: 3.2 }).length, 0);
+  const gap = [{ minX: -30, maxX: 30, minZ: 40, maxZ: 70 }];
+  const kept = clipCanyonWalls([wall], gap, { sample: 4, margin: 3, minLen: 3.2 });
+  assert.equal(kept.length, 1);
+  assert.ok(kept[0].len > 30);
+});

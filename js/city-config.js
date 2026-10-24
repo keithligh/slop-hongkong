@@ -237,6 +237,12 @@ const HK_GLTF_SHEET = HK_GLTF_SHEETS[0];
 const HK_STREET_EYE = Object.freeze({ x: -1.4, z: 29.3, heading: 1.29 });
 const HK_STREET_NEAR = 80;
 const HK_GLTF_TEX_NEAR = 120;
+// The chase looks east-south-east. The Henderson is about 220 m down that ray,
+// Fairmont House about 290 m, Lippo Centre about 380 m. A disc of 120 m leaves
+// those street faces on a mip chain. The corridor is the look, not the whole disc:
+// masses behind the camera stay on the far sampler.
+const HK_GLTF_STREET_REACH = 500;
+const HK_GLTF_STREET_HALF = 72;
 const HK_GLTF_CAP = 200;
 
 function hkCoreScale() {
@@ -1007,6 +1013,8 @@ export {
   HK_STREET_EYE,
   HK_STREET_NEAR,
   HK_GLTF_TEX_NEAR,
+  HK_GLTF_STREET_REACH,
+  HK_GLTF_STREET_HALF,
   blockInHkCore,
   hkCoreProject,
   hkCoreUnproject,

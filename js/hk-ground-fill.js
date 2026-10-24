@@ -250,7 +250,18 @@ function boxClosestDistance(box, eye) {
   return Math.hypot(x - eye.x, z - eye.z);
 }
 
-// Drop invented street wall where a LandsD mesh covers the centreline.
+function hitsMesh(x, z, meshes, margin) {
+  return meshes.some((mesh) => (
+    x >= mesh.minX - margin && x <= mesh.maxX + margin
+    && z >= mesh.minZ - margin && z <= mesh.maxZ + margin
+  ));
+}
+
+// Drop invented street wall where a LandsD mesh covers the centreline, or where
+// the wall's outer face (the side toward the lot) stands in that mesh. A 12 m
+// ribbon on the sidewalk sits in front of the photograph; its centreline is
+// outside the mesh, so a centreline-only test left a flat podium over the
+// shopfront past the 80 m disc. A gap with no mesh behind it keeps its wall.
 // When `eye` is set and a mesh lies within `near` of it, the same disc is dropped too.
 export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen = 3.2, eye = null, near = 80 } = {}) {
   if (!meshes?.length) return (walls || []).slice();
@@ -269,10 +280,10 @@ export function clipCanyonWalls(walls, meshes, { margin = 3, sample = 4, minLen 
       const t = -half + (i + 0.5) * dt;
       const x = wall.x + wall.dx * t;
       const z = wall.z + wall.dz * t;
-      const inMesh = meshes.some((mesh) => (
-        x >= mesh.minX - margin && x <= mesh.maxX + margin
-        && z >= mesh.minZ - margin && z <= mesh.maxZ + margin
-      ));
+      const reach = wall.depth > 0 && Number.isFinite(wall.rx) && Number.isFinite(wall.side) ? wall.depth * 0.5 : 0;
+      const ox = x + (wall.rx || 0) * (wall.side || 0) * reach;
+      const oz = z + (wall.rz || 0) * (wall.side || 0) * reach;
+      const inMesh = hitsMesh(x, z, meshes, margin) || (reach > 0 && hitsMesh(ox, oz, meshes, margin));
       const inEye = killNear && Math.hypot(x - eye.x, z - eye.z) <= near;
       covered.push(inMesh || inEye);
     }

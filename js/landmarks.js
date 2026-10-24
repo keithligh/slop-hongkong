@@ -141,8 +141,10 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
   const peak = 11.7;
   const mastH = 52.4;
   const ySkirt = HK_RETAIL_BELT;
-  // Same shopfront and curtain the other LandsD extrudes use. Not a separate chrome skin.
   const skirt = createRetailPodiumMaterial();
+  // No individualised BUILDING mesh on this plate (11-SW-9C / 8D / 9D). The prism
+  // stays. Metalness 0.72 with a 0.18 reflection floor is a chrome skin. Dielectric
+  // glass keeps the diagrid.
   const face = createCurtainWallMaterial({
     glassTint: 0x1a4d68,
     frameTint: 0xd5dee6,
@@ -150,7 +152,10 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
     floorHeight: 3.9,
     litProbability: 0.7,
     warmth: 0.4,
-    reflectivity: 0.96,
+    reflectivity: 0.22,
+    reflectionFloor: 0.04,
+    glassMetalness: 0,
+    glassRoughness: 0.48,
     seed: 4.2,
     boxLocal: false
   });

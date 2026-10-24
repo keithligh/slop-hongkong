@@ -4,6 +4,8 @@ import {
   HK_GLTF_CAP,
   HK_GLTF_SHEET,
   HK_GLTF_SHEETS,
+  HK_GLTF_STREET_HALF,
+  HK_GLTF_STREET_REACH,
   HK_GLTF_TEX_NEAR,
   HK_STREET_EYE,
   HK_STREET_NEAR,
@@ -229,18 +231,67 @@ export function gltfCoversFootprint(block, meshes, margin = 2) {
   return meshes.some((mesh) => footprintOverlapRatio(block, mesh, margin) >= 0.15);
 }
 
-// 0 keeps the file's native edge (LandsD facade JPEGs are 4096). Farther masses may drop to 2048.
+// 0 keeps the file's native edge (LandsD facade JPEGs are 4096). Off-chase masses may drop to 2048.
 export const HK_GLTF_FAR_TEX = 2048;
+
+function chaseAxes(eye) {
+  const heading = Number.isFinite(eye?.heading) ? eye.heading : HK_STREET_EYE.heading;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  return { x: eye?.x ?? HK_STREET_EYE.x, z: eye?.z ?? HK_STREET_EYE.z, fx, fz, sx: -fz, sz: fx };
+}
+
+// Along / side of the mesh box in the Des Voeux look frame. Side 0 is the look ray.
+export function gltfBoxChase(entry, eye = HK_STREET_EYE) {
+  const { x, z, fx, fz, sx, sz } = chaseAxes(eye);
+  let minAlong = Infinity;
+  let maxAlong = -Infinity;
+  let minSide = Infinity;
+  let maxSide = -Infinity;
+  const xs = [entry?.minX, entry?.maxX];
+  const zs = [entry?.minZ, entry?.maxZ];
+  for (const px of xs) {
+    for (const pz of zs) {
+      const dx = px - x;
+      const dz = pz - z;
+      const along = dx * fx + dz * fz;
+      const side = dx * sx + dz * sz;
+      if (along < minAlong) minAlong = along;
+      if (along > maxAlong) maxAlong = along;
+      if (side < minSide) minSide = side;
+      if (side > maxSide) maxSide = side;
+    }
+  }
+  return { minAlong, maxAlong, minSide, maxSide };
+}
+
+// The person chase, not a radius. A facade whose box crosses the look corridor
+// is on screen at eye height: The Henderson sits on this ray past 120 m, and a
+// mip chain there is the brown smear. Masses behind the camera do not qualify.
+export function gltfInStreetChase(entry, eye = HK_STREET_EYE, reach = HK_GLTF_STREET_REACH, half = HK_GLTF_STREET_HALF) {
+  if (!entry || !Number.isFinite(entry.minX)) return false;
+  const { minAlong, maxAlong, minSide, maxSide } = gltfBoxChase(entry, eye);
+  return maxAlong >= -12 && minAlong <= reach && maxSide >= -half && minSide <= half;
+}
+
+// Native photo: the 120 m disc (a glance off the ray still hits the colonnade)
+// or the chase corridor past that disc.
+export function gltfStreetPhoto(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
+  if (!entry) return false;
+  if (boxClosestDistance(entry, eye) <= near) return true;
+  return gltfInStreetChase(entry, eye);
+}
 
 export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   if (!entry) return HK_GLTF_FAR_TEX;
-  return boxClosestDistance(entry, eye) <= near ? 0 : HK_GLTF_FAR_TEX;
+  return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// Street-near atlases are one mip. The 4096 chart is the sample. A generated mip
+// Chase atlases are one mip. The 4096 chart is the sample. A generated mip
 // chain still resolved to a muddy level along Des Voeux after anisotropy 16 and a
-// -1.25 LOD bias. Anisotropy stays 16: the sampler is linear, and the GPU clamps
-// that sample to the only uploaded level.
+// -1.25 LOD bias, including on The Henderson once it sat past the 120 m disc.
+// Anisotropy stays 16: the sampler is linear, and the GPU clamps that sample
+// to the only uploaded level.
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
   if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 16 };
@@ -284,9 +335,15 @@ export function planGltfManifest(manifest, {
     if (pinBoxes.some((pin) => footprintOverlapRatio(pin, entry, 2) >= 0.15)) pinned.push(entry);
     else rest.push(entry);
   }
-  const byDist = (a, b) => a.dist - b.dist || (b.span - a.span);
-  pinned.sort(byDist);
-  rest.sort(byDist);
+  // Street faces first. A nearer Sheung Wan block behind the camera must not
+  // take the cap slot of a facade on the Des Voeux look.
+  const byChase = (a, b) => {
+    const pa = gltfStreetPhoto(a, eye) ? 0 : 1;
+    const pb = gltfStreetPhoto(b, eye) ? 0 : 1;
+    return pa - pb || a.dist - b.dist || (b.span - a.span);
+  };
+  pinned.sort(byChase);
+  rest.sort(byChase);
   const selected = pinned.concat(rest).slice(0, cap).map(({ dist, ...entry }) => entry);
   return {
     sheet: manifest?.sheet || '',

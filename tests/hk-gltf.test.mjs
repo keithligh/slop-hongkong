@@ -10,6 +10,8 @@ import {
   chooseCentralSheet,
   formatGltfLog,
   gltfAlbedoSampler,
+  gltfInStreetChase,
+  gltfStreetPhoto,
   gltfTextureMaxEdge,
   hiddenExtrudeIds,
   hk80GridToHk80Geog,
@@ -201,7 +203,7 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.doesNotMatch(gltfJs, /limitPhoto\(mat\.map\)/);
 });
 
-test('Des Voeux eye ranks ahead of a mass closer to the origin, and full-res stops at 120 m', () => {
+test('Des Voeux chase keeps a native single mip past 120 m, and off-look masses do not', () => {
   const plan = planGltfManifest({
     sheet: '11-SW-9C',
     buildings: [
@@ -212,6 +214,7 @@ test('Des Voeux eye ranks ahead of a mass closer to the origin, and full-res sto
   assert.equal(plan.selected[0].name, 'street');
   assert.equal(plan.skippedCap, 1);
   assert.equal(gltfTextureMaxEdge({ minX: -2, maxX: 2, minZ: 28, maxZ: 32 }), 0);
+  // North of the look ray at ~400 m. Not a Des Voeux facade.
   assert.equal(gltfTextureMaxEdge({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 }), 2048);
   const nearPhoto = gltfAlbedoSampler({ minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 });
   assert.equal(nearPhoto.maxEdge, 0);
@@ -221,8 +224,37 @@ test('Des Voeux eye ranks ahead of a mass closer to the origin, and full-res sto
   assert.equal(farPhoto.maxEdge, 2048);
   assert.equal(farPhoto.mipmaps, true);
   assert.equal(farPhoto.anisotropy, 16);
+  // The Henderson, 11-SW-9C B347491569901063A0, about 220 m down the chase.
+  const henderson = { minX: 218, maxX: 264, minZ: 54, maxZ: 105 };
+  assert.equal(gltfInStreetChase(henderson), true);
+  assert.equal(gltfStreetPhoto(henderson), true);
+  const hendersonPhoto = gltfAlbedoSampler(henderson);
+  assert.equal(gltfTextureMaxEdge(henderson), 0);
+  assert.equal(hendersonPhoto.maxEdge, 0);
+  assert.equal(hendersonPhoto.mipmaps, false);
+  assert.equal(hendersonPhoto.anisotropy, 16);
+  const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
+  const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
+  assert.equal(gltfAlbedoSampler(fairmont).mipmaps, false);
+  assert.equal(gltfAlbedoSampler(lippo).mipmaps, false);
+  const behind = { minX: -220, maxX: -160, minZ: 0, maxZ: 50 };
+  assert.equal(gltfInStreetChase(behind), false);
+  assert.equal(gltfAlbedoSampler(behind).mipmaps, true);
+  assert.equal(gltfAlbedoSampler(behind).maxEdge, 2048);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);
+});
+
+test('a Des Voeux facade keeps its cap slot ahead of a closer block behind the camera', () => {
+  const plan = planGltfManifest({
+    sheet: '11-SW-9C',
+    buildings: [
+      { file: 'behind.gltf', name: 'behind', minX: -220, maxX: -160, minZ: 0, maxZ: 50, minH: 4, maxH: 40, span: 60 },
+      { file: 'henderson.gltf', name: 'henderson', minX: 218, maxX: 264, minZ: 54, maxZ: 105, minH: 6, maxH: 195, span: 51 }
+    ]
+  }, { cap: 1, pins: [] });
+  assert.equal(plan.selected[0].name, 'henderson');
+  assert.equal(plan.skippedCap, 1);
 });
 
 test('a LandsD mesh inside 80 m hides every procedural footprint in that disc', () => {
