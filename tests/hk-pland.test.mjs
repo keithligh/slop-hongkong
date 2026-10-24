@@ -26,6 +26,7 @@ import {
   plandModelTransform,
   plandStreetHkpd,
   plandTilesUrl,
+  omitPlandCorridorGlass,
   planPlandManifest,
   resolvePlandRequest,
   withPlandCorridorHidden,
@@ -164,10 +165,12 @@ test('the corridor clip keeps a Des Voeux facade and drops the road and the sout
   assert.equal(quad.triangles, 2);
 });
 
-test('PlanD stays off unless the page asks for a donor or an A-B compare', () => {
-  assert.equal(resolvePlandRequest('https://x/index.html'), null);
+test('the Digit1 page mounts PlanD as a donor unless the query turns it off', () => {
+  assert.deepEqual(resolvePlandRequest('https://x/index.html'), { mode: 'donor' });
+  assert.deepEqual(resolvePlandRequest('https://x/index.html?at=-1.4,29.3,1.29'), { mode: 'donor' });
   assert.equal(resolvePlandRequest('https://x/index.html?pland=0'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=off'), null);
+  assert.equal(resolvePlandRequest('https://x/index.html?pland=false'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=mapillary'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=kartaview'), null);
   assert.deepEqual(resolvePlandRequest('https://x/index.html?pland=1'), { mode: 'donor' });
@@ -222,6 +225,51 @@ test('Digit1 cameras are the person chase, and a corridor extrude is hidden only
   assert.equal(mtl.mat_tex_0, 'level_5_0_0_tex_0.jpg');
 });
 
+test('corridor glass yields to PlanD and the Digit1 shopfront ribbon is not that list', () => {
+  const eye = HK_STREET_EYE;
+  const forward = Math.sin(eye.heading);
+  const ahead = Math.cos(eye.heading);
+  const curtain = {
+    x: eye.x + forward * 40,
+    z: eye.z + ahead * 40,
+    yaw: 0,
+    depth: 12,
+    len: 8,
+    side: 1,
+    rx: 0,
+    rz: 1,
+    dx: ahead,
+    dz: -forward
+  };
+  assert.equal(omitPlandCorridorGlass([curtain], { enabled: false }).length, 1);
+  assert.equal(omitPlandCorridorGlass([curtain], { enabled: true }).length, 0);
+  const beside = {
+    ...curtain,
+    x: eye.x + ahead * 200,
+    z: eye.z - forward * 200
+  };
+  assert.equal(omitPlandCorridorGlass([beside], { enabled: true }).length, 1);
+  const gap = {
+    x: 77.2,
+    z: 49.9,
+    yaw: 0,
+    depth: 12,
+    len: 6.5,
+    side: 1,
+    rx: 0,
+    rz: 1,
+    dx: -0.253,
+    dz: 0.967
+  };
+  assert.equal(omitPlandCorridorGlass([gap], { enabled: true }).length, 0);
+  assert.equal(omitPlandCorridorGlass([gap], { enabled: false }).length, 1);
+  const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
+  assert.match(grid, /omitPlandCorridorGlass\(glass/);
+  assert.match(grid, /retailMat, ribbons/);
+  assert.doesNotMatch(grid, /omitPlandCorridorGlass\(ribbons/);
+  assert.doesNotMatch(grid, /omitPlandCorridorGlass\(walls/);
+});
+
 test('boot wires the flag, the fetch tool, and no street-view atlas bake', () => {
   const main = readFileSync(path.join(root, 'js/main.js'), 'utf8');
   const html = readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -231,9 +279,12 @@ test('boot wires the flag, the fetch tool, and no street-view atlas bake', () =>
   assert.match(main, /preparePlandCorridor/);
   assert.match(main, /mountPlandCorridor/);
   assert.match(main, /hidePlandCorridorExtrudes/);
+  assert.match(main, /plandMode/);
+  assert.match(main, /hud-pland-credit/);
   assert.match(main, /mode === 'compare'/);
   assert.match(main, /正在載入規劃署三維實景（中環街廊）/);
   assert.match(main, /mountHkGltfBuildings/);
+  assert.match(html, /hud-pland-credit/);
   assert.match(html, /hk-pland-frame\.js/);
   assert.match(html, /hk-pland\.js/);
   assert.match(page, /GLTFLoader/);

@@ -14,8 +14,9 @@ import { gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame
 // Z-up, local X east, local Y north, local Z = HKPD. config.json model_transform
 // is a row-major 4×4 that adds the HK1980 origin. The page then uses the same
 // HK1980 → Central ENU path as the LandsD sheets.
-// The mesh is one continuous surface per tile, not a building. It stays off
-// unless the page is opened with ?pland=donor or ?pland=compare.
+// The mesh is one continuous surface per tile, not a building. The clip is the
+// Digit1 corridor, so the page mounts it as a donor unless ?pland=off (or an
+// unknown value). ?pland=compare still leaves the LandsD meshes unmounted.
 
 export const PLAND_TILES_API = 'https://pdmap.pland.gov.hk/plandapi/Tiles';
 export const PLAND_DATASET = 'https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model';
@@ -477,22 +478,78 @@ export function resolvePlandRequest(href) {
   }
   const query = raw.trim().toLowerCase();
   switch (query) {
+    // No flag: donor on the Digit1 clip. The chase URLs do not carry ?pland=donor.
     case '':
+    case '1':
+    case 'on':
+    case 'donor':
+      return { mode: 'donor' };
     case '0':
     case 'off':
     case 'false':
     case 'no':
       return null;
-    case '1':
-    case 'on':
-    case 'donor':
-      return { mode: 'donor' };
     case 'compare':
     case 'ab':
       return { mode: 'compare' };
     default:
       return null;
   }
+}
+
+// Curtain only. The retail shopfront is a separate mesh and must not be passed
+// here. Samples inside the Digit1 chase corridor are dropped so the 2017 photo
+// mass is not hidden behind hkCanyonGlass. The 80 m disc is not this test, and
+// a ribbon outside the corridor keeps its glass. Shopfront cells stay on the
+// caller’s other list, including the proven-empty Des Voeux curb.
+export function omitPlandCorridorGlass(walls, {
+  enabled = false,
+  eye = HK_STREET_EYE,
+  sample = 4,
+  minLen = 3.2
+} = {}) {
+  const list = walls || [];
+  if (!enabled) return list.slice();
+  const out = [];
+  for (const wall of list) {
+    if (!wall || !Number.isFinite(wall.dx) || !Number.isFinite(wall.dz) || !(wall.len > 0)) {
+      if (wall) out.push(wall);
+      continue;
+    }
+    const half = wall.len * 0.5;
+    const steps = Math.max(1, Math.ceil(wall.len / sample));
+    const dt = wall.len / steps;
+    const inside = [];
+    for (let i = 0; i < steps; i++) {
+      const t = -half + (i + 0.5) * dt;
+      const x = wall.x + wall.dx * t;
+      const z = wall.z + wall.dz * t;
+      inside.push(gltfInStreetChase({ minX: x, maxX: x, minZ: z, maxZ: z }, eye));
+    }
+    let i = 0;
+    while (i < steps) {
+      if (inside[i]) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j < steps && !inside[j]) j++;
+      const t0 = -half + i * dt;
+      const t1 = -half + j * dt;
+      const len = t1 - t0;
+      if (len >= minLen) {
+        const mid = (t0 + t1) * 0.5;
+        out.push({
+          ...wall,
+          x: wall.x + wall.dx * mid,
+          z: wall.z + wall.dz * mid,
+          len
+        });
+      }
+      i = j;
+    }
+  }
+  return out;
 }
 
 export function planPlandManifest(manifest, request) {

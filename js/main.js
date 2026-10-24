@@ -94,11 +94,14 @@ async function initApp() {
   }
 
   // 3. Hong Kong coast, footprint blocks, empty landmark slots, street details, and traffic.
-  // PlanD is off unless ?pland=donor or ?pland=compare. Donor keeps LandsD and fills
-  // atlas holes with the 2017 aerial mesh. Compare leaves the LandsD meshes unmounted.
+  // PlanD donor is the Digit1 default. LandsD stays in front. ?pland=off leaves the
+  // procedural corridor. Compare leaves the LandsD meshes unmounted.
   const plandPlan = await preparePlandCorridor(window.location.href);
   let gltfPlan = await prepareHkGltfSheet(window.location.href);
-  if (plandPlan) gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
+  if (plandPlan) {
+    gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
+    gltfPlan.plandMode = plandPlan.mode;
+  }
   if (loadingStatus && gltfPlan?.selected?.length && plandPlan?.mode !== 'compare') {
     loadingStatus.textContent = '正在載入地政總署單體建築模型…';
   }
@@ -116,7 +119,13 @@ async function initApp() {
   if (plandPlan?.mode === 'compare') console.info('[pland] compare: LandsD individualised meshes stay off');
   markInit('gltf');
   if (loadingStatus && plandPlan) loadingStatus.textContent = '正在載入規劃署三維實景（中環街廊）…';
-  await mountPlandCorridor(scene, plandPlan);
+  const plandMount = await mountPlandCorridor(scene, plandPlan);
+  const plandCredit = document.getElementById('hud-pland-credit');
+  if (plandCredit && plandPlan && plandMount.loaded > 0) {
+    plandCredit.hidden = false;
+    plandCredit.textContent = plandPlan.attribution;
+    if (plandPlan.capture) plandCredit.title = plandPlan.capture;
+  }
   markInit('pland');
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...gltfBuildings.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
 

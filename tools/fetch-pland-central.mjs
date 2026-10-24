@@ -58,7 +58,7 @@ function help() {
   return `Usage: node tools/fetch-pland-central.mjs [--format OBJ|OSGB|CESIUM] [--tiles tile_21_26,tile_22_26] [--out hk-3d/pland]
 
 Queries ${PLAND_TILES_API} at the Digit1 corridor (Des Voeux eye, then every 125 m along heading 1.29).
-OBJ zips are clipped to that corridor and written as glTF the page loads with ?pland=donor or ?pland=compare.
+OBJ zips are clipped to that corridor and written as glTF the page loads by default. ?pland=off leaves it unmounted. ?pland=compare is the A-B.
 OSGB and CESIUM zips are downloaded only. The page does not load them.
 hk-3d/ is gitignored. A missing manifest leaves LandsD individualised meshes as they are.`;
 }
@@ -369,7 +369,7 @@ async function main() {
   };
   writeFileSync(path.join(opts.out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`[pland] wrote ${path.join(opts.out, 'manifest.json')}`);
-  console.log('[pland] open index.html?pland=donor&at=-1.4,29.3,1.29');
+  console.log('[pland] open index.html?at=-1.4,29.3,1.29');
   console.log('[pland] A-B the same cameras with index.html?pland=compare&at=-1.4,29.3,1.29');
   if (!opts.keepZip) {
     for (const item of zips) rmSync(item.zipPath, { force: true });

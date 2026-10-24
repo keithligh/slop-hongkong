@@ -267,6 +267,10 @@ body::after {
 .hud-top-left {
   top: max(var(--edge), env(safe-area-inset-top));
   left: max(var(--edge), env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .hud-top-right {
@@ -395,6 +399,15 @@ body.hud-minimized .toolbar > :not(#btn-toggle-hud) {
 #hud-fps.fps-ok { color: var(--ok); }
 #hud-fps.fps-warn { color: var(--warn); }
 #hud-fps.fps-bad { color: var(--bad); }
+
+.pland-credit {
+  max-width: 340px;
+  margin: 0;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-2);
+}
 
 /* ------------------------------------------------------------------------------------------------------------------
    Top right: toolbar (time of day, teleport, map, clean view)

@@ -1,6 +1,6 @@
 # PlanD photo-realistic mesh — Central corridor
 
-The Des Voeux chase can load a Planning Department 3D Photo-realistic Model as a street-corridor donor where a LandsD individualised chart is blank. The mesh is real PlanD capture. It is off unless the page is opened with a flag. LandsD photographs stay mounted in the donor mode.
+The Des Voeux chase loads a Planning Department 3D Photo-realistic Model as a street-corridor donor. The mesh is real PlanD capture. It is on without `?pland=donor`. `?pland=off` leaves the procedural corridor. LandsD photographs stay mounted in the donor mode, and the canyon shopfront stays on ribbons the LandsD clip did not remove.
 
 This is not a claim that the chase looks like Sleeping Dogs. No WebGPU frame was captured for this cut.
 
@@ -8,7 +8,7 @@ This is not a claim that the chase looks like Sleeping Dogs. No WebGPU frame was
 
 `11-SW-9C` and `11-SW-8D` still load when their manifests are present. A triangle is still dropped only when all three corners sample LandsD atlas padding. Photographic charts on those sheets are not replaced.
 
-`?pland=donor` draws the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. Unknown values, including any street-view bake, leave PlanD off.
+The default page, and `?pland=donor`, draw the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. Canyon glass inside that same corridor is omitted while the clip is mounted, so `hkCanyonGlass` is not a toy band in front of the photograph. The shopfront mesh is a different list and stays, including the proven-empty Des Voeux curb past the 80 m disc. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that glass omit. Unknown values, including any street-view bake, leave PlanD off.
 
 ## Not a street-view atlas
 
@@ -58,7 +58,7 @@ Horizontal placement then uses the same path as the LandsD sheets: HK1980 grid �
 
 Vertical placement does not snap the mesh minimum to the sidewalk. The config bounds include HKPD down to about −188 m, and that minimum would put the street in the sky. The pavement datum is the 10th percentile of HKPD within 18 m of the Des Voeux eye. World y is `(HKPD − that datum) + sidewalk` (sidewalk 0.22 m). Tiles that do not contain the eye reuse the eye tile’s datum. If no tile has pavement samples there, the tool stops rather than invent a height.
 
-The glTF stores Altizure local positions. The page applies `model_transform` and the datum when it mounts the mesh, which is the same function the tests check.
+The glTF stores Altizure local positions. The page applies `model_transform` and the datum when it mounts the mesh, which is the same function the tests check. About 1.56 million triangles is a heavy page load. It is the Digit1 default because that is the street the chase looks at. `?pland=off` skips the request.
 
 ## Measured clip
 
@@ -71,16 +71,16 @@ The glTF stores Altizure local positions. The page applies `model_transform` and
 | tile_21_26 | 703,058 | 49,106 | 1,426,871 | x −8.1…241.9, z 28.2…174.7, y 0.14…285 |
 | tile_22_26 | 857,179 | 110,877 | 448,278 | x 241.9…490.5, z 28.2…237.2 |
 
-The Des Voeux eye (x −1.4, z 29.3) sits inside the `tile_21_26` box. The Henderson footprint (about x 218…264) straddles the tile edge at x ≈ 242, so the west of that site is `tile_21_26` and the east, with Fairmont House and Lippo Centre, is `tile_22_26`. The glTF buffers match their declared lengths and each tile keeps the four PlanD JPEGs. The clip is the capture’s own triangles, not a decimated stand-in. About 1.56 million triangles is a heavy page load. It stays behind the flag.
+The Des Voeux eye (x −1.4, z 29.3) sits inside the `tile_21_26` box. The Henderson footprint (about x 218…264) straddles the tile edge at x ≈ 242, so the west of that site is `tile_21_26` and the east, with Fairmont House and Lippo Centre, is `tile_22_26`. The glTF buffers match their declared lengths and each tile keeps the four PlanD JPEGs. The clip is the capture’s own triangles, not a decimated stand-in. About 1.56 million triangles is a heavy page load. It is the Digit1 default. `?pland=off` does not request it.
 
 ## Page
 
-Default: no request to `hk-3d/pland/manifest.json`.
+Default: request `hk-3d/pland/manifest.json` and mount the clip as a donor when it is present. A missing manifest leaves LandsD as it is.
 
 | Query | What mounts |
 | --- | --- |
-| (none), `?pland=0`, `?pland=off` | LandsD only |
-| `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them |
+| (none), `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them, corridor curtain omitted |
+| `?pland=0`, `?pland=off` | LandsD only. Corridor curtain stays |
 | `?pland=compare`, `?pland=ab` | PlanD corridor, LandsD individualised meshes left unmounted |
 
 While a PlanD manifest is loaded, footprint extrudes whose boxes sit in the Digit1 corridor are hidden, so the corridor is not glass in front of the aerial mesh. Gap walls outside that corridor are unchanged. The continuous mesh is not given a solid collider. A box around it would close Des Voeux.
@@ -93,9 +93,9 @@ Person chase only. A helicopter or a flyover is not the comparison.
 
 | View | Query |
 | --- | --- |
-| Des Voeux eye, looking east | `index.html?pland=donor&at=-1.4,29.3,1.29` |
-| 25 m along that look | `index.html?pland=donor&at=22.6,36.2,1.29` |
-| South side of the same station | `index.html?pland=donor&at=-1.4,35.3,1.29` |
+| Des Voeux eye, looking east | `index.html?at=-1.4,29.3,1.29` |
+| 25 m along that look | `index.html?at=22.6,36.2,1.29` |
+| South side of the same station | `index.html?at=-1.4,35.3,1.29` |
 
 The same three with `?pland=compare` are the A-B. Heading 1.29, person mode. What you should expect:
 

@@ -9,10 +9,9 @@ import {
   withPlandCorridorHidden
 } from './hk-pland-frame.js';
 
-// Loads the clipped PlanD corridor from hk-3d/pland/ when ?pland=donor or ?pland=compare.
-// The default page does not fetch it. Donor keeps the LandsD photographs and draws this
-// mesh behind them so an atlas hole can show the 2017 aerial surface. Compare leaves
-// the LandsD meshes off. Neither mode invents a shopfront.
+// Loads the clipped PlanD corridor from hk-3d/pland/. The Digit1 clip is on unless
+// ?pland=off. Donor keeps the LandsD photographs and draws this mesh behind them.
+// Compare leaves the LandsD meshes off. Neither mode invents a shopfront.
 
 const MANIFEST_URL = './hk-3d/pland/manifest.json';
 

@@ -23,6 +23,7 @@ import {
 } from './tsl-materials.js';
 import { GEO } from './geo-source.js';
 import { HK_CANYON_HEIGHT, canyonGlassWalls, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
+import { omitPlandCorridorGlass } from './hk-pland-frame.js';
 import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, planHkStreetGround } from './hk-pedestrian.js';
 import { planHkRoadDeck } from './hk-road-deck.js';
@@ -251,13 +252,17 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
     sidewalk: ISLAND_BOUNDS.sidewalkHeight,
     solids: lookSolids
   }) : walls;
-  const glassRibbons = glass.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
+  // Retail ribbons stay, including the proven-empty Des Voeux curb. Only the
+  // curtain yields inside the Digit1 corridor while the PlanD clip is mounted.
+  const plandOn = gltfPlan?.plandMode === 'donor' || gltfPlan?.plandMode === 'compare';
+  const glassShown = omitPlandCorridorGlass(glass, { enabled: plandOn });
+  const glassRibbons = glassShown.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const baseY = 0.16;
   const baseH = Math.max(0.4, HK_RETAIL_BELT - baseY);
   const glassH = Math.max(0.4, HK_CANYON_HEIGHT - baseH);
   addHkRibbonMesh(group, retailMat, ribbons, baseY, baseH, 'HkCentralStreetWalls', 1);
   addHkRibbonMesh(group, wallMat, glassRibbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
-  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} where the look ray misses and no tall mesh is on the lot side`);
+  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} look, ${glassShown.length} after PlanD corridor`);
   return walls.map((wall) => ({
     minX: wall.minX,
     maxX: wall.maxX,
