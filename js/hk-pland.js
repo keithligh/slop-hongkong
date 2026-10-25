@@ -8,6 +8,7 @@ import {
   planPlandManifest,
   plandLocalToWorld,
   plandOmitsCarriageShell,
+  plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
@@ -116,16 +117,18 @@ function finishBaked(geo) {
 // are passed. The carriageway shell is both modes. It is the low aerial
 // triangles on Des Voeux that the 1.2 m carpet test kept. The podium omit is
 // the centre inside a near box, below the retail band, after those two tests.
-// A higher centre stays. A far box is not punched. The Digit1 look yield is
-// both modes too: it drops street-height centroids on the chase ray, which
-// is where the mid-road melt sits after the apron has already ended.
+// A higher centre stays. A far box is not punched through its crown. The Digit1
+// look yield is both modes too: it drops street-height centroids on the chase
+// ray, which is where the mid-road melt sits after the apron has already ended.
+// The flank yield is donor only. It drops a look-axis shell proud of a chase
+// chart, and the canyon of a chart past 80 m, short of The Henderson.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
-  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0 };
+  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
@@ -134,6 +137,7 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   let shell = 0;
   let podium = 0;
   let look = 0;
+  let flank = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -168,6 +172,10 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
       look++;
       continue;
     }
+    if (boxes?.length && plandOmitsDigit1FlankChart(mid, boxes)) {
+      flank++;
+      continue;
+    }
     const p = written * 9;
     keptPos[p] = a[0];
     keptPos[p + 1] = a[1];
@@ -190,11 +198,11 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, landsd, shell, podium, look };
+  if (!written) return { geo: null, landsd, shell, podium, look, flank };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), landsd, shell, podium, look, kept: written };
+  return { geo: finishBaked(next), landsd, shell, podium, look, flank, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -238,6 +246,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let shell = 0;
   let podium = 0;
   let look = 0;
+  let flank = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
   const segments = desVoeuxCarriageSegments();
@@ -254,6 +263,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         shell += trimmed.shell;
         podium += trimmed.podium;
         look += trimmed.look;
+        flank += trimmed.flank;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -282,5 +292,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (shell) console.info(`[pland] omitted ${shell} low triangles on the Des Voeux carriageway`);
   if (podium) console.info(`[pland] omitted ${podium} podium triangles inside near LandsD boxes`);
   if (look) console.info(`[pland] omitted ${look} triangles on the Digit1 mid-road look`);
-  return { loaded, failed, triangles, yielded, shell, podium, look, group };
+  if (flank) console.info(`[pland] omitted ${flank} triangles proud of Digit1 LandsD flank charts`);
+  return { loaded, failed, triangles, yielded, shell, podium, look, flank, group };
 }

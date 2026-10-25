@@ -95,6 +95,7 @@ glTF node matrices are column-major, Y-up after the node: X = HK1980 easting, Y 
 ## Residual risks
 
 - 11-SW-8D on disk is the Des Voeux subset (24), not all 781. `--street` is how to cache the rest of the sheet. Buildings further into Sheung Wan stay on the opaque extrude until that cache grows.
+- Digit1 flank charts past 80 m stay on the single-mip sample. The PlanD shell in front of those charts is the flank yield in [HK_PLAND_MESH.md](HK_PLAND_MESH.md), not a second mip. The Henderson sample is unchanged.
 - About a metre of horizontal datum difference versus the LandsD grid API.
 - Snapping each mesh to the sidewalk flattens real steps in HKPD.
 - A mesh that does not share a footprint’s box can leave an extrude beside it outside the 80 m street disc, or hide a neighbour when the boxes overlap. Inside that disc the extrude is hidden once any LandsD mesh is present, so a gap with no individualised model is empty rather than a glass slab.

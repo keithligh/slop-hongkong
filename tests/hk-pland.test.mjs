@@ -13,6 +13,10 @@ import {
   PLAND_PAGE_TEX_EDGE,
   PLAND_PODIUM_ABOVE_BELT,
   PLAND_PODIUM_FACE,
+  PLAND_FLANK_FACE,
+  PLAND_FLANK_PROUD,
+  PLAND_FLANK_TOP,
+  plandOmitsDigit1FlankChart,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   PLAND_DIGIT1_LOOK_ALONG_MAX,
@@ -364,8 +368,42 @@ test('PlanD yields the Digit1 mid-road look and keeps the Henderson shell', () =
   const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
   assert.match(page, /plandOmitsDigit1LookGround/);
   assert.match(page, /omitted \$\{look\} triangles on the Digit1 mid-road look/);
+  assert.match(page, /omitted \$\{flank\} triangles proud of Digit1 LandsD flank charts/);
   assert.match(page, /omitted \$\{shell\} low triangles on the Des Voeux carriageway/);
   assert.match(page, /omitted \$\{podium\} podium triangles inside near LandsD boxes/);
+});
+
+test('PlanD yields a Digit1 flank chart and keeps the near-box interior', () => {
+  assert.equal(PLAND_FLANK_PROUD, 4);
+  assert.equal(PLAND_FLANK_FACE, 6);
+  assert.equal(PLAND_FLANK_TOP, 64);
+  const boc = { minX: 13.9, maxX: 56.1, minZ: 51.7, maxZ: 95.5, minH: 4, maxH: 73.7 };
+  const proud = { x: 58.07, y: 10.59, z: 71.81 };
+  assert.equal(plandYieldsToLandsd(proud, [boc]), false);
+  assert.equal(plandOmitsPodiumInsideLandsd(proud, [boc]), false);
+  assert.equal(plandOmitsDigit1LookGround(proud), false);
+  assert.equal(plandOmitsDigit1FlankChart(proud, [boc]), true);
+  assert.equal(plandOmitsDigit1FlankChart({ x: 54.1, y: 12, z: 72 }, [boc]), true);
+  assert.equal(plandOmitsDigit1FlankChart({ x: 35, y: HK_RETAIL_BELT + 12, z: 73 }, [boc]), false);
+  const streetWall = { minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 };
+  assert.equal(plandOmitsDigit1FlankChart(
+    { x: 2, y: HK_RETAIL_BELT + 12, z: 40 },
+    [streetWall]
+  ), false);
+  assert.equal(plandOmitsPodiumInsideLandsd(
+    { x: 2, y: HK_RETAIL_BELT + 12, z: 40 },
+    [streetWall]
+  ), false);
+  const ckc = { minX: 44.3, maxX: 109.8, minZ: 115.4, maxZ: 180.9, minH: 5, maxH: 281.5 };
+  assert.ok(boxClosestDistance(ckc, HK_STREET_EYE) > HK_STREET_NEAR);
+  assert.equal(plandOmitsDigit1FlankChart({ x: 70, y: 14, z: 140 }, [ckc]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 70, y: 14, z: 140 }, [ckc]), false);
+  assert.equal(plandOmitsDigit1FlankChart({ x: 70, y: 90, z: 140 }, [ckc]), false);
+  const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
+  assert.equal(plandOmitsDigit1FlankChart({ x: 230, y: 40, z: 80 }, [henderson]), false);
+  assert.equal(plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [henderson]), true);
+  assert.equal(plandOmitsDigit1FlankChart(null, [boc]), false);
+  assert.equal(plandOmitsDigit1FlankChart(proud, []), false);
 });
 
 test('PlanD yields on the street side of Henderson and keeps the mid-street photo point', () => {
@@ -505,6 +543,8 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.midRoadSlimeGone, true);
   assert.equal(gate.digit1GroundLifeVisible, true);
   assert.equal(gate.digit1SidewalkAuthentic, true);
+  assert.equal(gate.digit1FlankMeltGone, true);
+  assert.equal(gate.digit1CanyonDensity, true);
   assert.equal(gate.pass, true);
 });
 

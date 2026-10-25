@@ -21,11 +21,13 @@ import {
   desVoeuxCarriageSegments,
   plandCarriageDistance,
   plandOmitsCarriageShell,
+  plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   withPlandCorridorHidden
 } from '../js/hk-pland-frame.js';
+import { boxClosestDistance } from '../js/hk-gltf-frame.js';
 
 const ASHLAR_MOUNT = /hkCorridorPodiumFill|HkCorridorPodiumFill|createCorridorPodiumFillMaterial|corridorPodiumFillColor|0x8a847c/;
 const HENDERSON = {
@@ -59,6 +61,9 @@ export function noZombieSkyHoles(sources) {
   if (plandOmitsPodiumInsideLandsd(above, [SOUTH_WALL]) !== false) return false;
   if (plandOmitsPodiumInsideLandsd({ x: 230, y: HK_RETAIL_BELT + 40, z: 80 }, [HENDERSON]) !== false) return false;
   if (plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [HENDERSON]) !== true) return false;
+  // Flank yield must not reopen the near-box interior above the belt.
+  if (plandOmitsDigit1FlankChart(above, [SOUTH_WALL]) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 230, y: 40, z: 80 }, [HENDERSON]) !== false) return false;
   return true;
 }
 
@@ -157,6 +162,62 @@ export function digit1SidewalkAuthentic(sources) {
   return true;
 }
 
+const BOC_CHART = {
+  minX: 13.9,
+  maxX: 56.1,
+  minZ: 51.7,
+  maxZ: 95.5,
+  minH: 4,
+  maxH: 73.7
+};
+// Cheung Kong Center. Closest point is past the 80 m disc, on the right flank.
+const CKC_CHART = {
+  minX: 44.3,
+  maxX: 109.8,
+  minZ: 115.4,
+  maxZ: 180.9,
+  minH: 5,
+  maxH: 281.5
+};
+
+// right_mid second hit: PlanD just east of the Bank of China chart, above the
+// belt, outside the mid-road corridor. The eye-facing skirt misses that cap.
+export function digit1FlankMeltGone() {
+  const proud = { x: 58.07, y: 10.59, z: 71.81 };
+  if (plandYieldsToLandsd(proud, [BOC_CHART]) !== false) return false;
+  if (plandOmitsPodiumInsideLandsd(proud, [BOC_CHART]) !== false) return false;
+  if (plandOmitsDigit1LookGround(proud) !== false) return false;
+  if (plandOmitsDigit1FlankChart(proud, [BOC_CHART]) !== true) return false;
+  // Same chart, upper face band. Deep interior above the belt stays.
+  if (plandOmitsDigit1FlankChart({ x: 54.1, y: 12, z: 72 }, [BOC_CHART]) !== true) return false;
+  if (plandOmitsDigit1FlankChart({ x: 35, y: HK_RETAIL_BELT + 12, z: 73 }, [BOC_CHART]) !== false) return false;
+  if (boxClosestDistance(CKC_CHART, HK_STREET_EYE) <= 80) return false;
+  if (plandOmitsDigit1FlankChart({ x: 70, y: 14, z: 140 }, [CKC_CHART]) !== true) return false;
+  if (plandOmitsPodiumInsideLandsd({ x: 70, y: 14, z: 140 }, [CKC_CHART]) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 70, y: 90, z: 140 }, [CKC_CHART]) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 230, y: 40, z: 80 }, [HENDERSON]) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 2, y: HK_RETAIL_BELT + 12, z: 40 }, [SOUTH_WALL]) !== false) return false;
+  if (plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [HENDERSON]) !== true) return false;
+  // Mid-road slime stays on the look omit, not this flank test.
+  const slime = { x: 80.35, y: 10.37, z: 53.23 };
+  if (plandOmitsDigit1LookGround(slime) !== true) return false;
+  if (plandOmitsDigit1FlankChart(slime, [BOC_CHART, CKC_CHART, HENDERSON, SOUTH_WALL]) !== false) return false;
+  return true;
+}
+
+// Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
+export function digit1CanyonDensity(sources, plan) {
+  if (!noAshlarInvaderSlabs(sources, plan)) return false;
+  if (!orangeCanyonGone(sources)) return false;
+  if (!/proud of Digit1 LandsD flank charts/.test(sources?.pland || '')) return false;
+  if (!/plandOmitsDigit1FlankChart/.test(sources?.frame || '')) return false;
+  const podium = { x: 70, y: 6, z: 140 };
+  if (plandOmitsDigit1FlankChart(podium, [CKC_CHART]) !== true) return false;
+  if (plandOmitsPodiumInsideLandsd(podium, [CKC_CHART]) !== false) return false;
+  if (plan?.podiumFillIds?.size) return false;
+  return true;
+}
+
 export function orangeCanyonGone(sources) {
   return /omitPlandCorridorGlass\(walls/.test(sources.grid || '')
     && !/hkShopfrontAlbedo/.test(sources.pland || '');
@@ -188,7 +249,9 @@ export function digit1InvaderGate(root) {
     ndcCentreNotPland: ndcCentreNotPland(),
     midRoadSlimeGone: midRoadSlimeGone(sources),
     digit1GroundLifeVisible: digit1GroundLifeVisible(),
-    digit1SidewalkAuthentic: digit1SidewalkAuthentic(sources)
+    digit1SidewalkAuthentic: digit1SidewalkAuthentic(sources),
+    digit1FlankMeltGone: digit1FlankMeltGone(),
+    digit1CanyonDensity: digit1CanyonDensity(sources, plan)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -199,6 +262,8 @@ export function digit1InvaderGate(root) {
     && bars.midRoadSlimeGone === true
     && bars.digit1GroundLifeVisible === true
     && bars.digit1SidewalkAuthentic === true
+    && bars.digit1FlankMeltGone === true
+    && bars.digit1CanyonDensity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

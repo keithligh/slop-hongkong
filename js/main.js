@@ -100,7 +100,8 @@ async function initApp() {
   let gltfPlan = await prepareHkGltfSheet(window.location.href);
   if (plandPlan) {
     // Corridor extrudes stay hidden in both modes. No belt slab is emitted.
-    // The near PlanD omit is belt-capped when the donor mounts.
+    // The near PlanD omit is belt-capped when the donor mounts. Flank charts
+    // yield the look-axis shell and the canyon past 80 m in the trim.
     gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
     gltfPlan.plandMode = plandPlan.mode;
   }

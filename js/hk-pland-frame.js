@@ -11,7 +11,7 @@ import {
   hkFootprintHeight
 } from './city-config.js';
 import { GEO } from './geo-source.js';
-import { boxClosestDistance, gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
+import { boxClosestDistance, gltfBoxChase, gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
 import { HK_CURB_W, HK_WALK_W } from './hk-road-deck.js';
 
 // PlanD 3D Photo-realistic Model (規劃署). OBJ tiles are Altizure exports:
@@ -64,6 +64,17 @@ export const PLAND_DIGIT1_LOOK_ALONG_MIN = 8;
 export const PLAND_DIGIT1_LOOK_ALONG_MAX = 216;
 export const PLAND_DIGIT1_LOOK_HALF = 16;
 export const PLAND_DIGIT1_LOOK_Y_CLEAR = 18;
+// Digit1 flank. The mid-road corridor is ±16 m and the near-box omit stops
+// at the retail belt, so a shell on the down-street face of a chart, and the
+// flank charts past 80 m, still draw tile_21_26. Proud distance is the shell
+// just outside that face (the measured east cap is ~2 m). The face depth is
+// how far inside the lot the same facade can sit while the box is loose.
+// The top is the street-eye canyon, not the tower crown. A box whose closest
+// point is inside 12 m contains the eye; its interior stays belt-only.
+export const PLAND_FLANK_PROUD = 4;
+export const PLAND_FLANK_FACE = 6;
+export const PLAND_FLANK_TOP = 64;
+export const PLAND_FLANK_EYE_BOX = 12;
 // Vertices inside this radius of the Des Voeux eye set the HKPD of the pavement.
 // The OBJ also contains heights down to about −188 m. Snapping that minimum
 // to the sidewalk would lift the street into the sky.
@@ -666,6 +677,112 @@ export function plandOmitsPodiumInsideLandsd(point, boxes, {
     if (point.x < box.minX - pad || point.x > box.maxX + pad) continue;
     if (point.z < box.minZ - pad || point.z > box.maxZ + pad) continue;
     return true;
+  }
+  return false;
+}
+
+function finiteBox(box) {
+  return !!(box && Number.isFinite(box.minX) && Number.isFinite(box.maxX) && Number.isFinite(box.minZ) && Number.isFinite(box.maxZ));
+}
+
+function chartRoofY(box, sidewalk) {
+  if (!Number.isFinite(box.maxH) || !Number.isFinite(box.minH)) return Infinity;
+  return sidewalk + Math.max(0, box.maxH - box.minH) + 2;
+}
+
+// Outward of the nearest vertical face, when the point is inside that face band.
+function insetFaceOutward(point, box, face) {
+  const faces = [
+    { dist: point.x - box.minX, ox: -1, oz: 0 },
+    { dist: box.maxX - point.x, ox: 1, oz: 0 },
+    { dist: point.z - box.minZ, ox: 0, oz: -1 },
+    { dist: box.maxZ - point.z, ox: 0, oz: 1 }
+  ];
+  let best = faces[0];
+  for (let i = 1; i < faces.length; i++) {
+    if (faces[i].dist < best.dist) best = faces[i];
+  }
+  if (!(best.dist <= face)) return null;
+  return best;
+}
+
+function lookAxisDot(ox, oz, fx, fz) {
+  const len = Math.hypot(ox, oz);
+  if (!(len > 1e-6)) return 0;
+  return (ox * fx + oz * fz) / len;
+}
+
+function eyeOutwardDot(ox, oz, eyeX, eyeZ, box, point) {
+  const cx = Math.max(box.minX, Math.min(point.x, box.maxX));
+  const cz = Math.max(box.minZ, Math.min(point.z, box.maxZ));
+  const ex = eyeX - cx;
+  const ez = eyeZ - cz;
+  const outLen = Math.hypot(ox, oz);
+  const eyeLen = Math.hypot(ex, ez);
+  if (!(outLen > 1e-6) || !(eyeLen > 1)) return 0;
+  return (ox * ex + oz * ez) / (outLen * eyeLen);
+}
+
+// Donor mount. The Digit1 right flank is still tile_21_26 after the belt omit
+// and the mid-road corridor. Two shells:
+// - A centroid a few metres outside a chase chart, on the look axis. The 16 m
+//   skirt only keeps a shell whose outward points back at the eye, so the
+//   down-street cap (the measured ~2 m east of the Bank of China chart at
+//   y ~10.6) stays. This drops that cap. It does not widen the street skirt.
+// - Past the 80 m disc, a centroid inside a chase chart whose near edge is
+//   still short of The Henderson. The belt omit never sees that box. The
+//   drop stops at the canyon top, so the crown is not a full-height punch.
+// A near box (inside 80 m) keeps its deep interior above the belt. Only the
+// outer face band yields, and a box that contains the eye stays belt-only.
+// The Henderson interior and a centroid above the canyon top stay.
+export function plandOmitsDigit1FlankChart(point, boxes, {
+  eye = HK_STREET_EYE,
+  proud = PLAND_FLANK_PROUD,
+  face = PLAND_FLANK_FACE,
+  top = PLAND_FLANK_TOP,
+  alongMax = PLAND_DIGIT1_LOOK_ALONG_MAX,
+  eyeBox = PLAND_FLANK_EYE_BOX,
+  near = HK_STREET_NEAR,
+  belt = HK_RETAIL_BELT,
+  aboveBelt = PLAND_PODIUM_ABOVE_BELT,
+  sidewalk = ISLAND_BOUNDS.sidewalkHeight
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < top)) return false;
+  const heading = Number.isFinite(eye?.heading) ? eye.heading : HK_STREET_EYE.heading;
+  const eyeX = Number.isFinite(eye?.x) ? eye.x : HK_STREET_EYE.x;
+  const eyeZ = Number.isFinite(eye?.z) ? eye.z : HK_STREET_EYE.z;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  const faceBand = Number.isFinite(face) && face > 0 ? face : 0;
+  const proudBand = Number.isFinite(proud) && proud > 0 ? proud : 0;
+  for (const box of boxes || []) {
+    if (!finiteBox(box)) continue;
+    if (!gltfInStreetChase(box, eye)) continue;
+    const chase = gltfBoxChase(box, eye);
+    if (!(chase.maxAlong >= 8 && chase.minAlong <= alongMax)) continue;
+    if (point.y > chartRoofY(box, sidewalk)) continue;
+    const dist = boxClosestDistance(box, eye);
+    const cx = Math.max(box.minX, Math.min(point.x, box.maxX));
+    const cz = Math.max(box.minZ, Math.min(point.z, box.maxZ));
+    const outX = point.x - cx;
+    const outZ = point.z - cz;
+    const outLen = Math.hypot(outX, outZ);
+    const inside = !(outLen > 0.05);
+    if (!inside && outLen <= proudBand && Math.abs(lookAxisDot(outX, outZ, fx, fz)) > 0.5) return true;
+    if (dist > near) {
+      const pad = PLAND_PODIUM_FACE;
+      if (point.x < box.minX - pad || point.x > box.maxX + pad) continue;
+      if (point.z < box.minZ - pad || point.z > box.maxZ + pad) continue;
+      return true;
+    }
+    if (dist <= eyeBox || !inside) continue;
+    if (!(point.y >= belt + aboveBelt)) continue;
+    const inset = insetFaceOutward(point, box, faceBand);
+    if (!inset) continue;
+    const onLook = Math.abs(lookAxisDot(inset.ox, inset.oz, fx, fz)) > 0.5;
+    const onEye = eyeOutwardDot(inset.ox, inset.oz, eyeX, eyeZ, box, point) > 0.5;
+    if (onLook || onEye) return true;
   }
   return false;
 }
