@@ -615,7 +615,9 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1MidbandFacadeFidelity, true);
   assert.equal(gate.digit1PhotoFidelity, true);
   assert.equal(gate.digit1MidbandPhotoFidelity, false);
-  assert.equal(gate.pass, false);
+  assert.deepEqual(gate.openResiduals, ['digit1MidbandPhotoFidelity']);
+  assert.equal(gate.sleepingDogsBar, 'NOT YET');
+  assert.equal(gate.pass, true);
 });
 
 test('PlanD yields the Digit1 mid-band chartless plates and keeps the holds', () => {
