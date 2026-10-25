@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Download Open3Dhk individualised glTF into hk-3d/ (gitignored).
 // Default: 11-SW-9B, then 11-SW-9A when that sheet has no BUILDING model on Central.
-// --street subsets 11-SW-9C and 11-SW-8D down to BUILDING glTF that meet the Central box.
+// --street subsets 11-SW-9C and 11-SW-8D down to BUILDING glTF that meet the Central box,
+// and 11-SW-14A down to the Bank of China Tower photograph.
 // No API key is sent unless the zip answers 401.
 //
 //   node tools/fetch-central-gltf-sheet.mjs
@@ -18,13 +19,15 @@ import {
   assertSheetAllowed,
   boundsFromGltf,
   chooseCentralSheet,
-  isBuildingGltf
+  filterPinSheetBuildings,
+  isBuildingGltf,
+  isGltfPinSheet
 } from '../js/hk-gltf-frame.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const ZIP_URL = 'https://download.map.gov.hk/api/3d-zip/GLTF';
 // 9C: Statue Square and Des Voeux looking east. 8D: the dense sheet on the west side of that corner.
-const STREET_SHEETS = ['11-SW-9C', '11-SW-8D'];
+const STREET_SHEETS = ['11-SW-9C', '11-SW-8D', '11-SW-14A'];
 const STREET_MIN_SPAN = 8;
 
 function parseArgs(argv) {
@@ -166,7 +169,9 @@ async function subsetStreetSheet(sheet, opts) {
   extractEntries(zipPath, dir, gltfs);
   const survey = surveySheet(dir);
   const overlapBoxes = survey.buildings.filter((box) => overlapsCore(box));
-  const kept = overlapBoxes.filter((box) => box.span >= STREET_MIN_SPAN);
+  const spanned = overlapBoxes.filter((box) => box.span >= STREET_MIN_SPAN);
+  // 11-SW-14A is the Bank of China photograph. The rest of that sheet is not the Des Voeux chase.
+  const kept = isGltfPinSheet(sheet) ? filterPinSheetBuildings(spanned) : spanned;
   const prefixes = new Set(kept.map((box) => parentDir(box.file)).filter(Boolean));
   const extras = names.filter((name) => {
     if (name.toLowerCase().endsWith('.gltf')) return false;
@@ -196,7 +201,8 @@ With no --sheet, 11-SW-9B is fetched first. If it has no BUILDING glTF overlappi
 11-SW-9A is fetched and becomes the sheet.
 --street downloads 11-SW-9C and 11-SW-8D, keeps BUILDING glTF intersecting the Central box
 (span at least ${STREET_MIN_SPAN} m), and drops the rest of each zip.
-The page loads those two sheets when hk-3d/<sheet>/manifest.json is present.`;
+It also downloads 11-SW-14A and keeps only the BUILDING mesh that covers the Bank of China Tower plate.
+The page loads those sheets when hk-3d/<sheet>/manifest.json is present.`;
 }
 
 async function main() {
@@ -230,7 +236,7 @@ async function main() {
     }
     writeFileSync(path.join(opts.out, 'sheet.json'), `${JSON.stringify({
       sheets: reports.map(({ sheet, buildingFiles, overlap, kept }) => ({ sheet, buildingFiles, overlap, kept })),
-      reason: 'Central street faces: 11-SW-9C (Statue Square / Des Voeux east) and 11-SW-8D (dense sheet west of that corner)'
+      reason: 'Central street faces: 11-SW-9C (Statue Square / Des Voeux east), 11-SW-8D (dense sheet west of that corner), and 11-SW-14A (Bank of China Tower photograph only)'
     }, null, 2)}\n`);
     for (const survey of reports) {
       console.log(`[gltf] ${survey.sheet} kept ${survey.kept} / sheet ${survey.buildingFiles} / core ${survey.overlap}`);

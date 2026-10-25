@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BLOCKS,
+  HK_GLTF_SHEETS,
   HK_RETAIL_BELT,
   HK_STREET_EYE,
   ISLAND_BOUNDS,
@@ -20,7 +21,15 @@ import {
   hkResolveLandmarks
 } from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
-import { NULL_FILL_EDGE, boxClosestDistance, gltfAlbedoSampler } from '../js/hk-gltf-frame.js';
+import {
+  HK_BOC_PHOTO_CHART,
+  NULL_FILL_EDGE,
+  boxClosestDistance,
+  filterPinSheetBuildings,
+  footprintOverlapRatio,
+  gltfAlbedoSampler,
+  gltfCoversFootprint
+} from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
 import {
@@ -492,6 +501,52 @@ export function digit1MidbandFacadeFidelity(sources) {
   return true;
 }
 
+// Still-chartless Digit1 photo. Mid-band hits stay outside every BUILDING box
+// on 11-SW-9C and 11-SW-14A, so the canyon wall remains. The Bank of China
+// plate is the LandsD photograph B346831557701063A0. The white-X prism stays
+// the fallback when that manifest is absent. This is not a Sleeping Dogs claim.
+export function digit1PhotoFidelity(sources) {
+  if (!HK_GLTF_SHEETS.includes(HK_BOC_PHOTO_CHART.sheet)) return false;
+  if (HK_BOC_PHOTO_CHART.sheet !== '11-SW-14A') return false;
+  if (HK_BOC_PHOTO_CHART.id !== 'B346831557701063A0') return false;
+  const tower = digit1BocTowerPlate();
+  if (!tower) return false;
+  if (gltfCoversFootprint(tower, [HK_BOC_PHOTO_CHART]) !== true) return false;
+  if (!(footprintOverlapRatio(tower, HK_BOC_PHOTO_CHART, 2) >= 0.9)) return false;
+  const hits = [
+    { x: 84.93, z: 77.32 },
+    { x: 80.89, z: 71.08 },
+    { x: 141.18, z: 44.13 }
+  ];
+  for (const hit of hits) {
+    const inside = hit.x >= HK_BOC_PHOTO_CHART.minX && hit.x <= HK_BOC_PHOTO_CHART.maxX
+      && hit.z >= HK_BOC_PHOTO_CHART.minZ && hit.z <= HK_BOC_PHOTO_CHART.maxZ;
+    if (inside) return false;
+  }
+  const sampler = gltfAlbedoSampler(HK_BOC_PHOTO_CHART);
+  if (sampler.mipLevels !== 2 || sampler.anisotropy !== 16 || sampler.maxEdge !== 0) return false;
+  const stray = { id: 'stray', minX: 10, maxX: 30, minZ: 10, maxZ: 30, span: 20 };
+  const kept = filterPinSheetBuildings([stray, HK_BOC_PHOTO_CHART]);
+  if (kept.length !== 1 || kept[0].id !== HK_BOC_PHOTO_CHART.id) return false;
+  const frame = sources?.gltf || '';
+  if (!frame.includes(HK_BOC_PHOTO_CHART.id)) return false;
+  if (!frame.includes('11-SW-14A')) return false;
+  if (!/export function filterPinSheetBuildings/.test(frame)) return false;
+  const page = sources?.gltfPage || '';
+  if (!/isGltfPinSheet\(manifest\.sheet\)/.test(page)) return false;
+  if (!/filterPinSheetBuildings\(/.test(page)) return false;
+  const fetchSrc = sources?.fetch || '';
+  if (!/11-SW-14A/.test(fetchSrc)) return false;
+  if (!/filterPinSheetBuildings\(/.test(fetchSrc)) return false;
+  if (!/isGltfPinSheet\(sheet\)/.test(fetchSrc)) return false;
+  const landmarks = sources?.landmarks || '';
+  if (!/gltfCoversFootprint\(site\.block, gltfMeshes\)/.test(landmarks)) return false;
+  if (!digit1BocPrismFidelity(sources)) return false;
+  if (!digit1MidbandCanyonFidelity(sources)) return false;
+  if (!digit1MidbandFacadeFidelity(sources)) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -520,6 +575,8 @@ export function readDigit1Sources(root) {
     pland: read('js/hk-pland.js'),
     grid: read('js/city-grid.js'),
     gltf: read('js/hk-gltf-frame.js'),
+    gltfPage: read('js/hk-gltf.js'),
+    fetch: read('tools/fetch-central-gltf-sheet.mjs'),
     landmarks: read('js/landmarks.js')
   };
 }
@@ -544,7 +601,8 @@ export function digit1InvaderGate(root) {
     digit1BocPlateOwned: digit1BocPlateOwned(sources),
     digit1BocPrismFidelity: digit1BocPrismFidelity(sources),
     digit1MidbandCanyonFidelity: digit1MidbandCanyonFidelity(sources),
-    digit1MidbandFacadeFidelity: digit1MidbandFacadeFidelity(sources)
+    digit1MidbandFacadeFidelity: digit1MidbandFacadeFidelity(sources),
+    digit1PhotoFidelity: digit1PhotoFidelity(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -562,6 +620,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1BocPrismFidelity === true
     && bars.digit1MidbandCanyonFidelity === true
     && bars.digit1MidbandFacadeFidelity === true
+    && bars.digit1PhotoFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

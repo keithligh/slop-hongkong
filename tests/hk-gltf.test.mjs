@@ -5,10 +5,14 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import {
+  HK_BOC_PHOTO_CHART,
   assertSheetAllowed,
   boundsFromGltf,
   chooseCentralSheet,
+  filterPinSheetBuildings,
+  footprintOverlapRatio,
   formatGltfLog,
+  gltfCoversFootprint,
   bakeGltfWorldTriangles,
   clampLandsdAnisotropy,
   gltfAlbedoSampler,
@@ -126,7 +130,7 @@ test('BUILDING glTF paths are the individualised models, not terrain or generic'
 
 test('the manifest keeps Central masses up to the street cap and hides overlapping extrudes', () => {
   assert.equal(HK_GLTF_SHEET, '11-SW-9C');
-  assert.deepEqual(HK_GLTF_SHEETS, ['11-SW-9C', '11-SW-8D']);
+  assert.deepEqual(HK_GLTF_SHEETS, ['11-SW-9C', '11-SW-8D', '11-SW-14A']);
   assert.equal(HK_GLTF_CAP, 200);
   const manifest = {
     sheet: '11-SW-9A',
@@ -169,7 +173,7 @@ test('the manifest keeps Central masses up to the street cap and hides overlappi
 
 test('the page loads the Central street sheets unless a query names one', () => {
   const street = resolveHkGltfRequest('https://x/index.html');
-  assert.deepEqual(street.sheets, ['11-SW-9C', '11-SW-8D']);
+  assert.deepEqual(street.sheets, ['11-SW-9C', '11-SW-8D', '11-SW-14A']);
   assert.equal(street.cap, 200);
   assert.equal(resolveHkGltfRequest('https://x/index.html', { configured: '', sheets: [] }), null);
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A').sheet, '11-SW-9A');
@@ -199,6 +203,8 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.match(script, /STREET_SHEETS/);
   assert.match(script, /11-SW-9C/);
   assert.match(script, /11-SW-8D/);
+  assert.match(script, /11-SW-14A/);
+  assert.match(script, /filterPinSheetBuildings/);
   assert.match(script, /subsetStreetSheet/);
   const gltfJs = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
   assert.match(gltfJs, /gltfAlbedoSampler/);
@@ -433,4 +439,24 @@ test('the Bank of China Tower mesh is pinned ahead of a nearer street face', () 
   }, { cap: 1 });
   assert.equal(plan.selected[0].name, 'boc-mesh');
   assert.ok(plan.selected[0].minX < boc.cx && plan.selected[0].maxX > boc.cx);
+});
+
+test('the 11-SW-14A pin sheet keeps the Bank of China photograph and drops a stray mass', () => {
+  const boc = hkResolveLandmarks().placed.find((site) => site.id === 'boc').block;
+  assert.equal(HK_BOC_PHOTO_CHART.sheet, '11-SW-14A');
+  assert.equal(HK_BOC_PHOTO_CHART.id, 'B346831557701063A0');
+  assert.equal(gltfCoversFootprint(boc, [HK_BOC_PHOTO_CHART]), true);
+  assert.ok(footprintOverlapRatio(boc, HK_BOC_PHOTO_CHART, 2) >= 0.9);
+  const stray = { id: 'stray', minX: 10, maxX: 30, minZ: 10, maxZ: 30, span: 20 };
+  const kept = filterPinSheetBuildings([stray, HK_BOC_PHOTO_CHART]);
+  assert.deepEqual(kept.map((entry) => entry.id), [HK_BOC_PHOTO_CHART.id]);
+  const sampler = gltfAlbedoSampler(HK_BOC_PHOTO_CHART);
+  assert.equal(sampler.mipLevels, 2);
+  assert.equal(sampler.anisotropy, 16);
+  assert.equal(sampler.maxEdge, 0);
+  for (const hit of [{ x: 84.93, z: 77.32 }, { x: 80.89, z: 71.08 }, { x: 141.18, z: 44.13 }]) {
+    const inside = hit.x >= HK_BOC_PHOTO_CHART.minX && hit.x <= HK_BOC_PHOTO_CHART.maxX
+      && hit.z >= HK_BOC_PHOTO_CHART.minZ && hit.z <= HK_BOC_PHOTO_CHART.maxZ;
+    assert.equal(inside, false);
+  }
 });

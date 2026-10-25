@@ -515,6 +515,38 @@ function bankOfChinaPins() {
   return pins;
 }
 
+// The tower footprint crosses the south edge of 11-SW-9C into 11-SW-14A.
+// A bounds pass of that sheet's BUILDING glTF (2026-10-25) found one mesh on the
+// plate. 9C and 8D still do not contain it. Mid-band canyon hits are not in this box.
+export const HK_GLTF_PIN_SHEETS = Object.freeze(['11-SW-14A']);
+
+export const HK_BOC_PHOTO_CHART = Object.freeze({
+  sheet: '11-SW-14A',
+  id: 'B346831557701063A0',
+  file: 'BUILDING/B346831557701063A0/B346831557701063A0.gltf',
+  minX: 148.4,
+  maxX: 216.9,
+  minZ: 144.1,
+  maxZ: 212.6,
+  minH: 7.1,
+  maxH: 373,
+  span: 68.5
+});
+
+export function isGltfPinSheet(sheet) {
+  return HK_GLTF_PIN_SHEETS.includes(String(sheet || '').trim().toUpperCase());
+}
+
+// A pin sheet contributes the photograph that covers the plate. The rest of
+// that zip stays out of the cap so a nearer Admiralty block cannot drop a
+// Des Voeux face.
+export function filterPinSheetBuildings(buildings, pins = null) {
+  const pinBoxes = pins || bankOfChinaPins();
+  return (buildings || []).filter((entry) =>
+    pinBoxes.some((pin) => footprintOverlapRatio(pin, entry, 2) >= 0.15)
+  );
+}
+
 export function planGltfManifest(manifest, {
   cap = HK_GLTF_CAP,
   minSpan = HK_GLTF_MIN_SPAN,

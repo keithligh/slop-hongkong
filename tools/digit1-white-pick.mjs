@@ -744,7 +744,7 @@ function summarise(hit) {
 
 function sheetDirs() {
   const root3d = path.join(root, 'hk-3d');
-  return ['11-SW-9C', '11-SW-8D']
+  return ['11-SW-9C', '11-SW-8D', '11-SW-14A']
     .map((sheet) => path.join(root3d, sheet))
     .filter((dir) => existsSync(path.join(dir, 'manifest.json')));
 }

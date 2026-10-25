@@ -7,9 +7,11 @@ import {
   formatGltfLog,
   clampLandsdAnisotropy,
   gltfAlbedoSampler,
+  filterPinSheetBuildings,
   gltfInStreetChase,
   hiddenExtrudeIds,
   hk80ToWorld,
+  isGltfPinSheet,
   landsdAlbedoRow,
   landsdNullFillTriangles,
   nullFillSampleSize,
@@ -334,7 +336,13 @@ export async function prepareHkGltfSheet(href) {
   for (const sheet of request.sheets) {
     try {
       const manifest = await readSheetManifest(sheet);
-      buildings.push(...manifest.buildings);
+      let sheetBuildings = manifest.buildings;
+      if (isGltfPinSheet(manifest.sheet)) {
+        const pinned = filterPinSheetBuildings(sheetBuildings);
+        console.info(`[gltf] pin sheet ${manifest.sheet} kept ${pinned.length} of ${sheetBuildings.length}`);
+        sheetBuildings = pinned;
+      }
+      buildings.push(...sheetBuildings);
       loadedSheets.push(manifest.sheet);
       if (manifest.reason) reasons.push(manifest.reason);
       const count = manifest.counts || {};
