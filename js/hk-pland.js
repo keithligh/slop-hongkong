@@ -12,6 +12,7 @@ import {
   plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
+  plandOmitsDigit1MidbandPlate,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   resolvePlandRequest,
@@ -126,14 +127,17 @@ function finishBaked(geo) {
 // chart, and the canyon of a chart past 80 m, short of The Henderson.
 // The BoC Tower yield is donor only too. It drops the chartless LandsD plate
 // the shaft prism already owns. Compare passes no boxes, so that plate stays.
+// The mid-band yield is donor only as well. It drops the eye-proven chartless
+// plates between the near Building charts and the BoC / Henderson plate.
+// Compare passes no boxes, so those plates stay in the 2017 mesh.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
   const bocPlate = boxes?.length ? digit1BocTowerPlate() : null;
-  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0 };
+  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0, midband: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0, midband: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
@@ -144,6 +148,7 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   let look = 0;
   let flank = 0;
   let boc = 0;
+  let midband = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -186,6 +191,10 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
       boc++;
       continue;
     }
+    if (boxes?.length && plandOmitsDigit1MidbandPlate(mid)) {
+      midband++;
+      continue;
+    }
     const p = written * 9;
     keptPos[p] = a[0];
     keptPos[p + 1] = a[1];
@@ -208,11 +217,11 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, landsd, shell, podium, look, flank, boc };
+  if (!written) return { geo: null, landsd, shell, podium, look, flank, boc, midband };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), landsd, shell, podium, look, flank, boc, kept: written };
+  return { geo: finishBaked(next), landsd, shell, podium, look, flank, boc, midband, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -258,6 +267,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let look = 0;
   let flank = 0;
   let boc = 0;
+  let midband = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
   const segments = desVoeuxCarriageSegments();
@@ -276,6 +286,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         look += trimmed.look;
         flank += trimmed.flank;
         boc += trimmed.boc || 0;
+        midband += trimmed.midband || 0;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -306,5 +317,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (look) console.info(`[pland] omitted ${look} triangles on the Digit1 mid-road look`);
   if (flank) console.info(`[pland] omitted ${flank} triangles proud of Digit1 LandsD flank charts`);
   if (boc) console.info(`[pland] omitted ${boc} triangles on the Digit1 BoC Tower LandsD plate`);
-  return { loaded, failed, triangles, yielded, shell, podium, look, flank, boc, group };
+  if (midband) console.info(`[pland] omitted ${midband} triangles on the Digit1 mid-band chartless plate`);
+  return { loaded, failed, triangles, yielded, shell, podium, look, flank, boc, midband, group };
 }

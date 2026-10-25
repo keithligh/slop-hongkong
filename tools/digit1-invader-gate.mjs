@@ -25,15 +25,21 @@ import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
 import {
   PLAND_BOC_PLATE_PEAK,
+  PLAND_FLANK_TOP,
   PLAND_PODIUM_ABOVE_BELT,
   PLAND_STREET_SHELL_APRON,
   desVoeuxCarriageSegments,
+  DIGIT1_MIDBAND_PLATES,
   digit1BocTowerPlate,
+  digit1LookAxes,
+  digit1LookFrame,
+  digit1MidbandWallSpec,
   plandCarriageDistance,
   plandOmitsCarriageShell,
   plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
+  plandOmitsDigit1MidbandPlate,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   withPlandCorridorHidden
@@ -376,6 +382,82 @@ export function digit1BocPrismFidelity(sources) {
   return true;
 }
 
+function rayOutsideMidband(target) {
+  for (let step = 1; step <= 8; step++) {
+    const t = step / 8;
+    const point = {
+      x: HK_STREET_EYE.x + (target.x - HK_STREET_EYE.x) * t,
+      y: 2 + (target.y - 2) * t,
+      z: HK_STREET_EYE.z + (target.z - HK_STREET_EYE.z) * t
+    };
+    if (plandOmitsDigit1MidbandPlate(point)) return false;
+  }
+  return true;
+}
+
+// Chartless mid-band canyon. The measured PlanD centroids yield. The replacement
+// is the limestone plate wall, not a blank omit onto curtain at ~650 m.
+// Soft centre_low and the right apron stay. BoC and Henderson rays stay clear.
+export function digit1MidbandCanyonFidelity(sources) {
+  const right = { x: 84.93, y: 14.7, z: 77.32 };
+  const up = { x: 80.89, y: 18.31, z: 71.08 };
+  const left = { x: 141.18, y: 21.64, z: 44.13 };
+  if (plandOmitsDigit1MidbandPlate(right) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate(up) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate(left) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 88.57, y: 15.18, z: 79.25 }) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 89.23, y: 19.8, z: 75.12 }) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 146.84, y: 22.37, z: 44.76 }) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: right.x, y: PLAND_FLANK_TOP, z: right.z }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 139.11, y: 12.52, z: 129.12 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 80.35, y: 10.37, z: 53.23 }) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 80.35, y: 10.37, z: 53.23 }) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 58.07, y: 10.59, z: 71.81 }) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 58.07, y: 10.59, z: 71.81 }, [BOC_CHART]) !== true) return false;
+  const tower = digit1BocTowerPlate();
+  if (!tower) return false;
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: 25, z: tower.cz }, tower) !== true) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 161.94, y: 24.67, z: 145.11 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 217.99, y: 22.78, z: 92.93 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 212.8, y: 31.7, z: 91.1 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 2, y: HK_RETAIL_BELT + 12, z: 40 }) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  if (!rayOutsideMidband({ x: 161.94, y: 24.67, z: 145.11 })) return false;
+  if (!rayOutsideMidband({ x: 217.99, y: 22.78, z: 92.93 })) return false;
+  if (DIGIT1_MIDBAND_PLATES.length !== 2) return false;
+  const rightPlate = DIGIT1_MIDBAND_PLATES[0];
+  const leftPlate = DIGIT1_MIDBAND_PLATES[1];
+  if (rightPlate.sideMin <= 16 || leftPlate.sideMax >= -16) return false;
+  const axes = digit1LookAxes();
+  const rightWall = digit1MidbandWallSpec(rightPlate);
+  const rightFrame = digit1LookFrame(rightWall.position);
+  const rightMidAlong = (rightPlate.alongMin + rightPlate.alongMax) * 0.5;
+  const rightMidSide = (rightPlate.sideMin + rightPlate.sideMax) * 0.5;
+  if (Math.abs(rightFrame.along - rightMidAlong) > 1e-6) return false;
+  if (Math.abs(rightFrame.side - rightMidSide) > 1e-6) return false;
+  if (Math.abs(Math.cos(rightWall.rotationY) - axes.fx) > 1e-9) return false;
+  if (Math.abs(-Math.sin(rightWall.rotationY) - axes.fz) > 1e-9) return false;
+  const leftWall = digit1MidbandWallSpec(leftPlate);
+  if (!(leftWall.size.height > 40 && leftWall.size.height < 70)) return false;
+  const page = sources?.pland || '';
+  if (!/omitted \$\{midband\} triangles on the Digit1 mid-band chartless plate/.test(page)) return false;
+  if (!/boxes\?\.length && plandOmitsDigit1MidbandPlate/.test(page)) return false;
+  const buildings = sources?.buildings || '';
+  if (!/HkMidbandCanyon/.test(buildings)) return false;
+  if (!/createMidbandCanyonMaterial/.test(buildings)) return false;
+  if (!/plandMode === 'compare'/.test(buildings)) return false;
+  if (/hkShopfrontAlbedo/.test(buildings)) return false;
+  if (/hkCorridorPodiumFill/.test(buildings)) return false;
+  const materials = sources?.materials || '';
+  const start = materials.indexOf('function createMidbandCanyonMaterial');
+  const end = materials.indexOf('export {', start);
+  const body = start >= 0 && end > start ? materials.slice(start, end) : '';
+  if (!/mat\.name = 'hkMidbandCanyon'/.test(body)) return false;
+  if (/hkShopfrontAlbedo|0x8a847c|createCurtainWallMaterial|hkTowerGlass/.test(body)) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -426,7 +508,8 @@ export function digit1InvaderGate(root) {
     digit1CanyonDensity: digit1CanyonDensity(sources, plan),
     digit1FarFlankFidelity: digit1FarFlankFidelity(),
     digit1BocPlateOwned: digit1BocPlateOwned(sources),
-    digit1BocPrismFidelity: digit1BocPrismFidelity(sources)
+    digit1BocPrismFidelity: digit1BocPrismFidelity(sources),
+    digit1MidbandCanyonFidelity: digit1MidbandCanyonFidelity(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -442,6 +525,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1FarFlankFidelity === true
     && bars.digit1BocPlateOwned === true
     && bars.digit1BocPrismFidelity === true
+    && bars.digit1MidbandCanyonFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

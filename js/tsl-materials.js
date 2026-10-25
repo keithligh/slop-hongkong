@@ -2068,12 +2068,38 @@ function createPodiumMasonryMaterial() {
   return mat;
 }
 
+// Digit1 mid-band canyon wall. The eye plates have no BUILDING chart and no
+// LandsD ring. This is limestone courses, not the orange shopfront atlas,
+// not the grey corridor ashlar, and not curtain glass down to the pavement.
+let _midbandCanyon = null;
+function createMidbandCanyonMaterial() {
+  if (_midbandCanyon) return _midbandCanyon;
+  const mat = new THREE.MeshStandardNodeMaterial({
+    roughness: 0.92,
+    metalness: 0
+  });
+  mat.name = 'hkMidbandCanyon';
+  mat.colorNode = Fn(() => {
+    const y = positionWorld.y;
+    const course = fract(y.mul(0.46));
+    const bed = smoothstep(0.0, 0.03, course).mul(float(1.0).sub(smoothstep(0.07, 0.11, course)));
+    const n = normalWorld;
+    const wall = float(1.0).sub(step(0.65, abs(n.y)));
+    const stone = vec3(0.76, 0.69, 0.58);
+    const mortar = vec3(0.55, 0.50, 0.44);
+    return mix(stone, mortar, bed.mul(wall));
+  })();
+  _midbandCanyon = mat;
+  return mat;
+}
+
 export {
   cityUniforms,
   WALL_KINDS,
   createCurtainWallMaterial,
   createRetailPodiumMaterial,
   createPodiumMasonryMaterial,
+  createMidbandCanyonMaterial,
   createCarPaintMaterial,
   createTreeMaterial,
   createParkPavingMaterial,

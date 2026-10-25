@@ -18,9 +18,13 @@ import {
   PLAND_FLANK_FACE,
   PLAND_FLANK_PROUD,
   PLAND_FLANK_TOP,
+  DIGIT1_MIDBAND_PLATES,
   digit1BocTowerPlate,
+  digit1LookFrame,
+  digit1MidbandWallSpec,
   plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
+  plandOmitsDigit1MidbandPlate,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   PLAND_DIGIT1_LOOK_ALONG_MAX,
@@ -607,7 +611,70 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1FarFlankFidelity, true);
   assert.equal(gate.digit1BocPlateOwned, true);
   assert.equal(gate.digit1BocPrismFidelity, true);
+  assert.equal(gate.digit1MidbandCanyonFidelity, true);
   assert.equal(gate.pass, true);
+});
+
+test('PlanD yields the Digit1 mid-band chartless plates and keeps the holds', () => {
+  const right = { x: 84.93, y: 14.7, z: 77.32 };
+  const up = { x: 80.89, y: 18.31, z: 71.08 };
+  const left = { x: 141.18, y: 21.64, z: 44.13 };
+  assert.equal(DIGIT1_MIDBAND_PLATES.length, 2);
+  assert.equal(plandOmitsDigit1MidbandPlate(right), true);
+  assert.equal(plandOmitsDigit1MidbandPlate(up), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 88.57, y: 15.18, z: 79.25 }), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 89.23, y: 19.8, z: 75.12 }), true);
+  assert.equal(plandOmitsDigit1MidbandPlate(left), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 146.84, y: 22.37, z: 44.76 }), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: right.x, y: PLAND_FLANK_TOP, z: right.z }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 278.49, y: 15.44, z: 110.37 }), false);
+  assert.equal(plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 139.11, y: 12.52, z: 129.12 }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 80.35, y: 10.37, z: 53.23 }), false);
+  assert.equal(plandOmitsDigit1LookGround({ x: 80.35, y: 10.37, z: 53.23 }), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 58.07, y: 10.59, z: 71.81 }), false);
+  assert.equal(plandOmitsDigit1FlankChart({ x: 58.07, y: 10.59, z: 71.81 }, [{
+    minX: 13.9, maxX: 56.1, minZ: 51.7, maxZ: 95.5, minH: 4, maxH: 73.7
+  }]), true);
+  const tower = digit1BocTowerPlate();
+  assert.equal(plandOmitsDigit1BocPlate({ x: tower.cx, y: 25, z: tower.cz }, tower), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: tower.cx, y: 25, z: tower.cz }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 161.94, y: 24.67, z: 145.11 }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 217.99, y: 22.78, z: 92.93 }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 212.8, y: 31.7, z: 91.1 }), false);
+  assert.equal(plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [{
+    minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21
+  }]), true);
+  assert.equal(plandOmitsDigit1MidbandPlate({ x: 2, y: HK_RETAIL_BELT + 12, z: 40 }), false);
+  assert.equal(plandOmitsDigit1MidbandPlate(null), false);
+  for (const target of [
+    { x: 161.94, y: 24.67, z: 145.11 },
+    { x: 217.99, y: 22.78, z: 92.93 }
+  ]) {
+    for (let step = 1; step <= 8; step++) {
+      const t = step / 8;
+      assert.equal(plandOmitsDigit1MidbandPlate({
+        x: HK_STREET_EYE.x + (target.x - HK_STREET_EYE.x) * t,
+        y: 2 + (target.y - 2) * t,
+        z: HK_STREET_EYE.z + (target.z - HK_STREET_EYE.z) * t
+      }), false);
+    }
+  }
+  const wall = digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[0]);
+  const frame = digit1LookFrame(wall.position);
+  const plate = DIGIT1_MIDBAND_PLATES[0];
+  assert.ok(Math.abs(frame.along - (plate.alongMin + plate.alongMax) * 0.5) < 1e-6);
+  assert.ok(Math.abs(frame.side - (plate.sideMin + plate.sideMax) * 0.5) < 1e-6);
+  assert.ok(Math.abs(Math.cos(wall.rotationY) - Math.sin(HK_STREET_EYE.heading)) < 1e-9);
+  assert.ok(Math.abs(-Math.sin(wall.rotationY) - Math.cos(HK_STREET_EYE.heading)) < 1e-9);
+  assert.ok(wall.size.height > 40 && wall.size.height < 70);
+  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
+  assert.match(page, /omitted \$\{midband\} triangles on the Digit1 mid-band chartless plate/);
+  assert.match(page, /boxes\?\.length && plandOmitsDigit1MidbandPlate/);
+  const buildings = readFileSync(path.join(root, 'js/buildings.js'), 'utf8');
+  assert.match(buildings, /HkMidbandCanyon/);
+  assert.match(buildings, /plandMode === 'compare'/);
+  assert.doesNotMatch(buildings, /hkShopfrontAlbedo|hkCorridorPodiumFill/);
 });
 
 test('corridor glass and the Digit1 shopfront ribbon both yield to PlanD', () => {

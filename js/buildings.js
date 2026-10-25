@@ -12,7 +12,13 @@ import {
   hkRetailSlices,
   hkScaleRing
 } from './city-config.js';
-import { createCurtainWallMaterial, createPodiumMasonryMaterial, createRetailPodiumMaterial } from './tsl-materials.js';
+import { DIGIT1_MIDBAND_PLATES, digit1MidbandWallSpec } from './hk-pland-frame.js';
+import {
+  createCurtainWallMaterial,
+  createMidbandCanyonMaterial,
+  createPodiumMasonryMaterial,
+  createRetailPodiumMaterial
+} from './tsl-materials.js';
 
 // LandsD footprint ring extruded to TopHeight − BaseHeight. Same shape path as
 // createExtrudedPolygonMesh in city-grid.js: outline in (x, −z), depth along Y.
@@ -258,11 +264,14 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
     });
   }
   for (const key of Object.keys(batches)) flush(key);
+  const midbandWalls = addDigit1MidbandWalls(group, gltfPlan);
   scene.add(group);
   const named = allBlocks.filter((block) => /HSBC Main Building|Prince's Building|Bank of China Building|Standard Chartered Bank Building/i.test(block.id));
+  const curtainMeshes = group.children.filter((mesh) => mesh.name !== 'HkMidbandCanyon').length;
   console.info(
     `[buildings] Central core ${HK_CORE_BBOX.south},${HK_CORE_BBOX.west},${HK_CORE_BBOX.north},${HK_CORE_BBOX.east} ` +
-    `extruded ${extruded} LandsD footprints; podium+tower ${podiumTowers}; curtain wall ${group.children.length} meshes; ` +
+    `extruded ${extruded} LandsD footprints; podium+tower ${podiumTowers}; curtain wall ${curtainMeshes} meshes; ` +
+    `midband canyon ${midbandWalls}; ` +
     `null height ${HK_NULL_HEIGHT} ${skippedNull}; ` +
     `landmark shaft ${skippedOwned}; ` +
     `gltf hidden ${skippedGltf}; ` +
@@ -281,6 +290,30 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
 
 function buildCityBlocks(scene, gltfPlan = null) {
   return buildHkFootprintBlocks(scene, gltfPlan);
+}
+
+// Honest face for the Digit1 mid-band plates. No LandsD ring and no BUILDING
+// glTF cover those eye hits, so a blank PlanD omit would open onto distant
+// curtain. The wall is the look-frame plate, limestone, canyon height.
+// Compare keeps the 2017 mesh and does not draw this stand-in.
+// Kept off the footprint-extrude path: that path must not grow a box stand-in.
+function addDigit1MidbandWalls(group, gltfPlan) {
+  if (gltfPlan?.plandMode === 'compare') return 0;
+  const material = createMidbandCanyonMaterial();
+  for (const plate of DIGIT1_MIDBAND_PLATES) {
+    const spec = digit1MidbandWallSpec(plate);
+    const geo = new THREE.BoxGeometry(spec.size.along, spec.size.height, spec.size.side);
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.name = 'HkMidbandCanyon';
+    mesh.userData.hkSource = 'footprint';
+    mesh.userData.hkPlate = spec.id;
+    mesh.position.set(spec.position.x, spec.position.y, spec.position.z);
+    mesh.rotation.y = spec.rotationY;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  }
+  return DIGIT1_MIDBAND_PLATES.length;
 }
 
 export { buildCityBlocks };

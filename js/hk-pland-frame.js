@@ -75,6 +75,31 @@ export const PLAND_FLANK_PROUD = 4;
 export const PLAND_FLANK_FACE = 6;
 export const PLAND_FLANK_TOP = 64;
 export const PLAND_FLANK_EYE_BOX = 12;
+// Digit1 mid-band. The eye hits at ~(84.9, 14.7, 77.3), ~(80.9, 18.3, 71.1),
+// and ~(141.2, 21.6, 44.1) are not on a LandsD ring and not on a mounted
+// BUILDING chart. The right cluster is the gap east of the Bank of China
+// Building; the left cluster is the 2017 Murray approach west of The Henderson.
+// Side stays outside the ±16 m look corridor, so this is not the mid-road omit.
+// The far side stays inside the ray to the Bank of China Tower (side/along ~0.35
+// on the right) and off the centre ray to The Henderson. World y stops at the
+// flank canyon top, so the crown is not a full-height punch. Compare passes no
+// boxes, so the omit does not run. The replacement wall is HkMidbandCanyon.
+export const DIGIT1_MIDBAND_PLATES = Object.freeze([
+  Object.freeze({
+    id: 'digit1-midband-right',
+    alongMin: 82,
+    alongMax: 112,
+    sideMin: 16.5,
+    sideMax: 27
+  }),
+  Object.freeze({
+    id: 'digit1-midband-left',
+    alongMin: 128,
+    alongMax: 162,
+    sideMin: -36,
+    sideMax: -16.5
+  })
+]);
 // Chartless Bank of China Tower plate. The LandsD footprint is the owner.
 // Proud is a shell just outside that ring, not the bounding-box wedges.
 // The peak is the prism cap already on the tallest edge. The 52.4 m mast stays.
@@ -847,6 +872,79 @@ function ringClearance(ring, x, z) {
 // within a couple of metres of it, is omitted below the prism peak. The mast
 // above that line stays, so the omit is not a hole into sky. The bounding-box
 // corners sit off the ring and are not this plate. No other landmark matches.
+export function digit1LookAxes(eye = HK_STREET_EYE) {
+  const heading = Number.isFinite(eye?.heading) ? eye.heading : HK_STREET_EYE.heading;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  return {
+    heading,
+    x: Number.isFinite(eye?.x) ? eye.x : HK_STREET_EYE.x,
+    z: Number.isFinite(eye?.z) ? eye.z : HK_STREET_EYE.z,
+    fx,
+    fz,
+    sx: -fz,
+    sz: fx
+  };
+}
+
+export function digit1LookFrame(point, eye = HK_STREET_EYE) {
+  const axes = digit1LookAxes(eye);
+  const dx = point.x - axes.x;
+  const dz = point.z - axes.z;
+  return {
+    along: dx * axes.fx + dz * axes.fz,
+    side: dx * axes.sx + dz * axes.sz
+  };
+}
+
+// Donor mount. Chartless mid-band plates the Digit1 eye actually reads.
+// A centroid inside either look-frame plate, below the canyon top, is omitted.
+// The Bank of China Tower ray and the Henderson centre ray stay outside.
+// Soft centre_low and the right_mid_low apron stay outside. The look corridor
+// (side within 16 m) stays on the mid-road omit.
+export function plandOmitsDigit1MidbandPlate(point, {
+  plates = DIGIT1_MIDBAND_PLATES,
+  top = PLAND_FLANK_TOP,
+  eye = HK_STREET_EYE
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < top)) return false;
+  const frame = digit1LookFrame(point, eye);
+  for (const plate of plates || []) {
+    if (!plate) continue;
+    if (frame.along < plate.alongMin || frame.along > plate.alongMax) continue;
+    if (frame.side < plate.sideMin || frame.side > plate.sideMax) continue;
+    return true;
+  }
+  return false;
+}
+
+// Look-aligned box for one mid-band plate. Local +X is the look axis and
+// local +Z is side (right positive). Three.js rotation Y sends local +X to
+// (cos θ, −sin θ); θ = heading − π/2 matches (sin heading, cos heading).
+export function digit1MidbandWallSpec(plate, eye = HK_STREET_EYE, {
+  base = ISLAND_BOUNDS.sidewalkHeight,
+  top = PLAND_FLANK_TOP
+} = {}) {
+  const axes = digit1LookAxes(eye);
+  const along = (plate.alongMin + plate.alongMax) * 0.5;
+  const side = (plate.sideMin + plate.sideMax) * 0.5;
+  return {
+    id: plate.id,
+    size: {
+      along: plate.alongMax - plate.alongMin,
+      height: top - base,
+      side: plate.sideMax - plate.sideMin
+    },
+    position: {
+      x: axes.x + axes.fx * along + axes.sx * side,
+      y: (base + top) * 0.5,
+      z: axes.z + axes.fz * along + axes.sz * side
+    },
+    rotationY: axes.heading - Math.PI / 2
+  };
+}
+
 export function plandOmitsDigit1BocPlate(point, plate, {
   proud = PLAND_BOC_PLATE_PROUD,
   peak = PLAND_BOC_PLATE_PEAK,
