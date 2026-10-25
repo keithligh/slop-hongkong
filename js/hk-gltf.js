@@ -95,8 +95,8 @@ export function setLandsdAnisotropyLimit(value) {
 
 // Level 0 is the JPEG. Level 1 is half resolution, so the GPU may filter
 // anisotropically and still cannot select the deep mips where atlas fill
-// smears a street-height chart. No second level is uploaded when the device
-// cannot do anisotropy.
+// smears a street-height chart. The Digit1 chase past 80 m uses this same
+// upload. No second level is uploaded when the device cannot do anisotropy.
 function uploadNearFacadeMips(tex, anisotropy) {
   const aniso = clampLandsdAnisotropy(anisotropy, anisotropyLimit);
   tex.userData.hkFullRes = true;

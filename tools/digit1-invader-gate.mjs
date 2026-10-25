@@ -12,7 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, ROADS } from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
-import { NULL_FILL_EDGE } from '../js/hk-gltf-frame.js';
+import { NULL_FILL_EDGE, boxClosestDistance, gltfAlbedoSampler } from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
 import {
@@ -27,8 +27,6 @@ import {
   plandYieldsToLandsd,
   withPlandCorridorHidden
 } from '../js/hk-pland-frame.js';
-import { boxClosestDistance } from '../js/hk-gltf-frame.js';
-
 const ASHLAR_MOUNT = /hkCorridorPodiumFill|HkCorridorPodiumFill|createCorridorPodiumFillMaterial|corridorPodiumFillColor|0x8a847c/;
 const HENDERSON = {
   minX: 217.54,
@@ -205,6 +203,50 @@ export function digit1FlankMeltGone() {
   return true;
 }
 
+function chaseTwoLevel(entry) {
+  const sampler = gltfAlbedoSampler(entry);
+  return sampler.maxEdge === 0
+    && sampler.mipmaps === true
+    && sampler.mipLevels === 2
+    && sampler.anisotropy === 16
+    && sampler.minFilter === 'mipmap';
+}
+
+function lookPointBox(dist) {
+  const fx = Math.sin(HK_STREET_EYE.heading);
+  const fz = Math.cos(HK_STREET_EYE.heading);
+  const x = HK_STREET_EYE.x + dist * fx;
+  const z = HK_STREET_EYE.z + dist * fz;
+  return { minX: x, maxX: x, minZ: z, maxZ: z };
+}
+
+// Mid-far canyon charts on the Digit1 look. The photograph past 80 m is the
+// same two-level anisotropic sample as the near disc, not a full mip chain
+// and not the one-tap smear. The chartless Bank of China Tower plate is not
+// punched: there is no BUILDING mesh to put there. A low centre sample past
+// Henderson (tile_22_26) is not this bar.
+export function digit1FarFlankFidelity() {
+  if (!chaseTwoLevel(lookPointBox(96))) return false;
+  if (!chaseTwoLevel(lookPointBox(220))) return false;
+  if (!chaseTwoLevel(HENDERSON)) return false;
+  if (!chaseTwoLevel({ minX: 278, maxX: 316, minZ: 86, maxZ: 121 })) return false;
+  if (!chaseTwoLevel({ minX: 341, maxX: 384, minZ: 135, maxZ: 178 })) return false;
+  if (!(boxClosestDistance(CKC_CHART, HK_STREET_EYE) > 80)) return false;
+  if (!chaseTwoLevel(CKC_CHART)) return false;
+  const at80 = gltfAlbedoSampler(lookPointBox(80));
+  if (at80.mipLevels !== 2 || at80.anisotropy !== 16) return false;
+  const offLook = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
+  if (offLook.maxEdge !== 2048 || offLook.mipLevels === 2) return false;
+  const behind = gltfAlbedoSampler({ minX: -220, maxX: -160, minZ: 0, maxZ: 50 });
+  if (behind.maxEdge !== 2048 || behind.mipLevels === 2) return false;
+  const tower = BLOCKS.find((block) => block.name === 'Bank of China Tower' && block.height === 303.3);
+  if (!tower) return false;
+  const charts = [BOC_CHART, CKC_CHART, HENDERSON, SOUTH_WALL];
+  if (plandOmitsDigit1FlankChart({ x: tower.cx, y: 25, z: tower.cz }, charts) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -251,7 +293,8 @@ export function digit1InvaderGate(root) {
     digit1GroundLifeVisible: digit1GroundLifeVisible(),
     digit1SidewalkAuthentic: digit1SidewalkAuthentic(sources),
     digit1FlankMeltGone: digit1FlankMeltGone(),
-    digit1CanyonDensity: digit1CanyonDensity(sources, plan)
+    digit1CanyonDensity: digit1CanyonDensity(sources, plan),
+    digit1FarFlankFidelity: digit1FarFlankFidelity()
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -264,6 +307,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1SidewalkAuthentic === true
     && bars.digit1FlankMeltGone === true
     && bars.digit1CanyonDensity === true
+    && bars.digit1FarFlankFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

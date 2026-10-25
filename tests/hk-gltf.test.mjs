@@ -285,7 +285,7 @@ test('null-fill samples a 4096 atlas at 1024 so a chart-grey edge stays a chart'
   assert.doesNotMatch(gltfJs, /NULL_FILL_EDGE = 256/);
 });
 
-test('Des Voeux near facades take two mips, and the chase past 80 m stays one mip', () => {
+test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets stay downscaled', () => {
   const plan = planGltfManifest({
     sheet: '11-SW-9C',
     buildings: [
@@ -318,12 +318,18 @@ test('Des Voeux near facades take two mips, and the chase past 80 m stays one mi
   assert.equal(at80.anisotropy, 16);
   const past80 = gltfAlbedoSampler(pointBox(96));
   assert.equal(gltfInStreetChase(pointBox(96)), true);
-  assert.equal(past80.mipmaps, false);
-  assert.equal(past80.anisotropy, 1);
-  assert.equal(past80.minFilter, 'linear');
+  assert.equal(past80.maxEdge, 0);
+  assert.equal(past80.mipmaps, true);
+  assert.equal(past80.mipLevels, 2);
+  assert.equal(past80.anisotropy, 16);
+  assert.equal(past80.minFilter, 'mipmap');
+  const midFar = gltfAlbedoSampler(pointBox(220));
+  assert.equal(midFar.mipLevels, 2);
+  assert.equal(midFar.anisotropy, 16);
   const farPhoto = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
   assert.equal(farPhoto.maxEdge, 2048);
   assert.equal(farPhoto.mipmaps, true);
+  assert.equal(farPhoto.mipLevels, undefined);
   assert.equal(farPhoto.anisotropy, 16);
   assert.equal(farPhoto.minFilter, 'mipmap');
   // The Henderson, 11-SW-9C B347491569901063A0, about 220 m down the chase.
@@ -333,17 +339,22 @@ test('Des Voeux near facades take two mips, and the chase past 80 m stays one mi
   const hendersonPhoto = gltfAlbedoSampler(henderson);
   assert.equal(gltfTextureMaxEdge(henderson), 0);
   assert.equal(hendersonPhoto.maxEdge, 0);
-  assert.equal(hendersonPhoto.mipmaps, false);
-  assert.equal(hendersonPhoto.anisotropy, 1);
-  assert.equal(hendersonPhoto.minFilter, 'linear');
+  assert.equal(hendersonPhoto.mipmaps, true);
+  assert.equal(hendersonPhoto.mipLevels, 2);
+  assert.equal(hendersonPhoto.anisotropy, 16);
+  assert.equal(hendersonPhoto.minFilter, 'mipmap');
   const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
   const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
-  assert.equal(gltfAlbedoSampler(fairmont).mipmaps, false);
-  assert.equal(gltfAlbedoSampler(fairmont).minFilter, 'linear');
-  assert.equal(gltfAlbedoSampler(lippo).mipmaps, false);
+  assert.equal(gltfAlbedoSampler(fairmont).mipmaps, true);
+  assert.equal(gltfAlbedoSampler(fairmont).mipLevels, 2);
+  assert.equal(gltfAlbedoSampler(fairmont).minFilter, 'mipmap');
+  assert.equal(gltfAlbedoSampler(fairmont).anisotropy, 16);
+  assert.equal(gltfAlbedoSampler(lippo).mipmaps, true);
+  assert.equal(gltfAlbedoSampler(lippo).mipLevels, 2);
   const behind = { minX: -220, maxX: -160, minZ: 0, maxZ: 50 };
   assert.equal(gltfInStreetChase(behind), false);
   assert.equal(gltfAlbedoSampler(behind).mipmaps, true);
+  assert.equal(gltfAlbedoSampler(behind).mipLevels, undefined);
   assert.equal(gltfAlbedoSampler(behind).maxEdge, 2048);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);

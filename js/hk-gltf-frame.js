@@ -287,14 +287,15 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// Within HK_STREET_NEAR (80 m) the facade is close enough for two levels:
-// the 4096 photograph and one half-res mip. Anisotropy is legal only when a
-// second level exists. A full generated chain still walks into LandsD atlas
-// fill at a street angle (the muddy mip), so the near sampler does not ask
-// for one. Past that disc, including The Henderson, the chase stays one mip
-// with a linear filter and no anisotropy: a mipmapped min-filter on a level
-// that was never uploaded is the brown patch, and anisotropy is what steps
-// onto it. Off-look masses still keep a real mip chain and anisotropy 16.
+// A native chase photograph is two levels: the 4096 file and one half-res
+// mip, sampled with anisotropy 16. That is the 80 m street disc and the
+// Digit1 look past it — The Henderson, Fairmont House, Lippo Centre, and
+// flank charts whose boxes cross the corridor. Anisotropy is legal only
+// when a second level exists. A full generated chain still walks into LandsD
+// atlas fill at a street angle (the muddy mip), so this sampler does not ask
+// for one. A mipmapped filter on a level that was never uploaded is the
+// brown patch. Off-look masses still keep a downscaled mip chain and
+// anisotropy 16.
 // LandsD null-fill triangles stay omitted. The sample uses glTF v = 0 as the
 // first image row, the same row flipY false uploads.
 
@@ -497,12 +498,12 @@ export function bakeGltfWorldTriangles(doc, buffers, sidewalk = ISLAND_BOUNDS.si
 
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
-  // The 80 m street disc, not the 120 m native-resolution disc. A second mip
-  // here is what makes anisotropy legal without a deep chain to smear.
-  if (maxEdge === 0 && boxClosestDistance(entry, eye) <= HK_STREET_NEAR) {
+  // Every native chase photograph, not only the 80 m disc. The second mip is
+  // what makes anisotropy legal. Stopping at that level keeps the GPU off the
+  // deeper atlas-fill mips. Off-look masses (maxEdge 2048) keep a full chain.
+  if (maxEdge === 0) {
     return { maxEdge: 0, mipmaps: true, mipLevels: 2, anisotropy: 16, minFilter: 'mipmap' };
   }
-  if (maxEdge === 0) return { maxEdge: 0, mipmaps: false, anisotropy: 1, minFilter: 'linear' };
   return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
 }
 
