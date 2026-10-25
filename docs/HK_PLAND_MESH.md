@@ -122,6 +122,8 @@ The right half of that eye (NDC x 0.2 to 0.95, y −0.35 to 0.15) falls from mea
 
 The south station (`?at=-1.4,35.3,1.29`) is `artifacts/digit1-eye-east-kerb-south.png`. Its right half has mean luma about 51 and no pale pixels. NDC 0.45, −0.15 is (40, 39, 36). NDC 0, −0.08 is (240, 168, 92), the shelter plate from that station.
 
+The corridor shopfront omit is `artifacts/digit1-eye-east-canyon.png` (swiftshader, LandsD manifests absent, PlanD `tile_21_26` mounted). The mount log keeps 2026 of 2145 retail ribbons and drops 9774 carriageway/sidewalk triangles. NDC 0, 0 is PlanD photo about RGB(50, 60, 53). The right street band (NDC x 0.72–1, y 0.30–0.78) falls from about 24% shopfront orange/red/green to under 1%. The same eye with `?pland=off` puts the ribbons back (retail 2145) and the right band returns to that 24%. Sleeping Dogs is not claimed. Keith’s full frame, not NDC 0, is the bar.
+
 ## Attribution
 
 © 香港特別行政區政府規劃署 3D Photo-realistic Model / [DATA.GOV.HK](https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model).
