@@ -8,6 +8,7 @@ import {
   planPlandManifest,
   plandLocalToWorld,
   plandOmitsCarriageShell,
+  plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   resolvePlandRequest,
   withPlandCorridorHidden
@@ -110,22 +111,25 @@ function finishBaked(geo) {
 
 // LandsD skirt is donor only: a triangle whose centre sits on the street side
 // of a loaded box is the 2017 shell in front of that photograph. Compare keeps
-// that skirt off. The carriageway shell is both modes. It is the low aerial
-// triangles on Des Voeux that the 1.2 m carpet test kept.
+// that skirt off, and the near-podium omit with it, because no LandsD boxes
+// are passed. The carriageway shell is both modes. It is the low aerial
+// triangles on Des Voeux that the 1.2 m carpet test kept. The podium omit is
+// the centre inside a near box, below the retail band, after those two tests.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
-  if (!geo) return { geo: null, landsd: 0, shell: 0 };
-  if (!boxes?.length && !roads.length) return { geo: finishBaked(geo), landsd: 0, shell: 0 };
+  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0 };
+  if (!boxes?.length && !roads.length) return { geo: finishBaked(geo), landsd: 0, shell: 0, podium: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, landsd: 0, shell: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
   let written = 0;
   let landsd = 0;
   let shell = 0;
+  let podium = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -152,6 +156,10 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
       shell++;
       continue;
     }
+    if (boxes?.length && plandOmitsPodiumInsideLandsd(mid, boxes)) {
+      podium++;
+      continue;
+    }
     const p = written * 9;
     keptPos[p] = a[0];
     keptPos[p + 1] = a[1];
@@ -174,11 +182,11 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, landsd, shell };
+  if (!written) return { geo: null, landsd, shell, podium };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), landsd, shell, kept: written };
+  return { geo: finishBaked(next), landsd, shell, podium, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -220,6 +228,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let triangles = 0;
   let yielded = 0;
   let shell = 0;
+  let podium = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
   const segments = desVoeuxCarriageSegments();
@@ -234,6 +243,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         const trimmed = trimPlandInFrontOfLandsd(baked, boxes, segments);
         yielded += trimmed.landsd;
         shell += trimmed.shell;
+        podium += trimmed.podium;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -260,5 +270,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   console.info(formatPlandLog({ ...plan, triangles }));
   if (yielded) console.info(`[pland] omitted ${yielded} triangles on the street side of a LandsD box`);
   if (shell) console.info(`[pland] omitted ${shell} low triangles on the Des Voeux carriageway`);
-  return { loaded, failed, triangles, yielded, shell, group };
+  if (podium) console.info(`[pland] omitted ${podium} podium triangles inside near LandsD boxes`);
+  return { loaded, failed, triangles, yielded, shell, podium, group };
 }

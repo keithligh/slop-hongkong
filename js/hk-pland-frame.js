@@ -2,14 +2,16 @@ import {
   BLOCKS,
   HK_GLTF_STREET_HALF,
   HK_GLTF_STREET_REACH,
+  HK_RETAIL_BELT,
   HK_STREET_EYE,
+  HK_STREET_NEAR,
   ISLAND_BOUNDS,
   blockInHkCore,
   hkCoreUnproject,
   hkFootprintHeight
 } from './city-config.js';
 import { GEO } from './geo-source.js';
-import { gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
+import { boxClosestDistance, gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
 import { HK_CURB_W, HK_WALK_W } from './hk-road-deck.js';
 
 // PlanD 3D Photo-realistic Model (規劃署). OBJ tiles are Altizure exports:
@@ -29,8 +31,14 @@ export const PLAND_ATTRIBUTION = '© 香港特別行政區政府規劃署 3D Pho
 export const PLAND_PAGE_TEX_EDGE = 2048;
 // Street-side apron in front of a loaded LandsD box. The 2017 shell can sit
 // proud of The Henderson and paint a pale face over the photograph. Interior
-// triangles stay, so an atlas hole can still show the aerial surface.
+// triangles stay, except the near-eye podium band below. An atlas hole above
+// that band, or on a box farther than the street disc, can still show the aerial.
 export const PLAND_LANDSD_SKIRT = 16;
+// Outward pad so a shell proud of the lot face is the same podium omit as the
+// interior. It stays inside half a metre. The 16 m skirt is a different test.
+export const PLAND_PODIUM_FACE = 0.5;
+// Metres above the retail belt. Podium omit stops here. Roofs keep the donor.
+export const PLAND_PODIUM_ABOVE_BELT = 1;
 export const PLAND_CAPTURE = 'Hong Kong Island aerial photographs, March 2017; tile files dated February 2019';
 
 // Metres above the sidewalk. Triangles entirely below this are the road carpet.
@@ -588,6 +596,33 @@ export function plandYieldsToLandsd(point, boxes, {
     if (!(eyeLen > 1)) continue;
     const dot = (outX * ex + outZ * ez) / (outLen * eyeLen);
     if (dot > 0.5) return true;
+  }
+  return false;
+}
+
+// Donor mount. LandsD null-fill opens atlas holes, and a PlanD centre inside
+// that box was the melted right podium at the Des Voeux eye. Drop the centre
+// when the box is within the street disc, the centre is in the footprint (or
+// the half-metre face pad), and it is still in the retail band. A higher
+// centre stays, and so does a box past the disc, including The Henderson.
+export function plandOmitsPodiumInsideLandsd(point, boxes, {
+  eye = HK_STREET_EYE,
+  near = HK_STREET_NEAR,
+  belt = HK_RETAIL_BELT,
+  face = PLAND_PODIUM_FACE,
+  aboveBelt = PLAND_PODIUM_ABOVE_BELT
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < belt + aboveBelt)) return false;
+  const pad = Number.isFinite(face) && face > 0 ? face : 0;
+  for (const box of boxes || []) {
+    if (!box || !Number.isFinite(box.minX) || !Number.isFinite(box.maxX) || !Number.isFinite(box.minZ) || !Number.isFinite(box.maxZ)) {
+      continue;
+    }
+    if (boxClosestDistance(box, eye) > near) continue;
+    if (point.x < box.minX - pad || point.x > box.maxX + pad) continue;
+    if (point.z < box.minZ - pad || point.z > box.maxZ + pad) continue;
+    return true;
   }
   return false;
 }
