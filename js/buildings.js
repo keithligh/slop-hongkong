@@ -294,7 +294,7 @@ function buildCityBlocks(scene, gltfPlan = null) {
 
 // Honest face for the Digit1 mid-band plates. No LandsD ring and no BUILDING
 // glTF cover those eye hits, so a blank PlanD omit would open onto distant
-// curtain. The wall is the look-frame plate, limestone, canyon height.
+// curtain. The wall is the look-frame plate: shopfront belt, glass above.
 // Compare keeps the 2017 mesh and does not draw this stand-in.
 // Kept off the footprint-extrude path: that path must not grow a box stand-in.
 function addDigit1MidbandWalls(group, gltfPlan) {

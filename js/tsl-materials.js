@@ -60,7 +60,8 @@ import {
   CENTRAL_PARK_BOUNDS,
   PLAY_BOUNDS,
   ISLAND_BOUNDS,
-  HK_RETAIL_BELT
+  HK_RETAIL_BELT,
+  HK_STREET_EYE
 } from './city-config.js';
 import { HK_SHOP_BAY, HK_SHOP_BAYS, shopfrontImage } from './hk-shopfront.js';
 
@@ -2068,27 +2069,114 @@ function createPodiumMasonryMaterial() {
   return mat;
 }
 
-// Digit1 mid-band canyon wall. The eye plates have no BUILDING chart and no
-// LandsD ring. This is limestone courses, not the orange shopfront atlas,
-// not the grey corridor ashlar, and not curtain glass down to the pavement.
+// Digit1 mid-band canyon wall. The eye hits are still outside every Active
+// LandsD ring, and the street-chase sheets have no BUILDING mesh on those
+// plates. The face is an opaque shopfront up to HK_RETAIL_BELT and a window
+// grid above it, tiled along the Des Voeux look. Enamel bands are the street
+// cue. This is not the orange shopfront atlas, not corridor ashlar, and not
+// curtain glass down to the pavement. It is not a 2024 Murray podium and not
+// a LandsD photograph. Sleeping Dogs is not claimed.
 let _midbandCanyon = null;
 function createMidbandCanyonMaterial() {
   if (_midbandCanyon) return _midbandCanyon;
   const mat = new THREE.MeshStandardNodeMaterial({
-    roughness: 0.92,
-    metalness: 0
+    roughness: 0.72,
+    metalness: 0.04
   });
   mat.name = 'hkMidbandCanyon';
+  const lookX = float(Math.sin(HK_STREET_EYE.heading));
+  const lookZ = float(Math.cos(HK_STREET_EYE.heading));
+  const eyeX = float(HK_STREET_EYE.x);
+  const eyeZ = float(HK_STREET_EYE.z);
+  const shopBay = float(6.2);
+  const winBay = float(2.75);
+  const storeyH = float(3.45);
+
+  function midbandFrame() {
+    const y = positionWorld.y.toVar();
+    const along = positionWorld.x.sub(eyeX).mul(lookX).add(positionWorld.z.sub(eyeZ).mul(lookZ)).toVar();
+    const belt = float(HK_RETAIL_BELT);
+    const podium = float(1.0).sub(step(belt, y));
+    const wall = float(1.0).sub(step(0.65, abs(normalWorld.y)));
+    const roof = step(0.65, abs(normalWorld.y));
+    const shopU = fract(along.div(shopBay));
+    const opening = smoothstep(0.10, 0.16, shopU).mul(float(1.0).sub(smoothstep(0.84, 0.90, shopU)));
+    const pier = float(1.0).sub(opening);
+    const fascia = smoothstep(3.15, 3.40, y).mul(float(1.0).sub(smoothstep(4.70, 4.95, y)));
+    const upperSign = smoothstep(6.20, 6.40, y).mul(float(1.0).sub(smoothstep(7.30, 7.50, y)));
+    const signBand = fascia.add(upperSign).mul(opening).mul(podium);
+    const plinth = float(1.0).sub(smoothstep(1.05, 1.30, y));
+    const coping = smoothstep(7.50, 7.70, y).mul(podium);
+    const rise = y.sub(belt);
+    const storey = fract(rise.div(storeyH));
+    const winU = fract(along.div(winBay));
+    const pane = filteredPulse(winU, 0.07, 0.93, fwidth(along.div(winBay)))
+      .mul(filteredPulse(storey, 0.10, 0.86, fwidth(rise.div(storeyH))));
+    const slot = mod(floor(along.div(shopBay)).add(step(5.5, y).mul(2.0)), float(4.0));
+    return { along, podium, wall, roof, pier, signBand, plinth, coping, pane, slot, rise };
+  }
+
+  function signColor(slot) {
+    const red = vec3(0.77, 0.09, 0.16);
+    const green = vec3(0.05, 0.42, 0.24);
+    const blue = vec3(0.07, 0.23, 0.54);
+    const gold = vec3(0.79, 0.64, 0.15);
+    return mix(
+      mix(red, green, step(0.5, slot)),
+      mix(blue, gold, step(2.5, slot)),
+      step(1.5, slot)
+    );
+  }
+
   mat.colorNode = Fn(() => {
-    const y = positionWorld.y;
-    const course = fract(y.mul(0.46));
-    const bed = smoothstep(0.0, 0.03, course).mul(float(1.0).sub(smoothstep(0.07, 0.11, course)));
-    const n = normalWorld;
-    const wall = float(1.0).sub(step(0.65, abs(n.y)));
-    const stone = vec3(0.76, 0.69, 0.58);
-    const mortar = vec3(0.55, 0.50, 0.44);
-    return mix(stone, mortar, bed.mul(wall));
+    const frame = midbandFrame();
+    const shopMouth = vec3(0.06, 0.07, 0.08);
+    const pierCol = vec3(0.34, 0.31, 0.28);
+    const plinthCol = vec3(0.18, 0.16, 0.15);
+    const copingCol = vec3(0.28, 0.27, 0.25);
+    const signCol = signColor(frame.slot);
+    const bayCol = mix(mix(shopMouth, pierCol, frame.pier), signCol, frame.signBand);
+    const podiumCol = mix(mix(bayCol, plinthCol, frame.plinth), copingCol, frame.coping);
+    const colId = floor(frame.along.div(winBay));
+    const rowId = floor(frame.rise.div(storeyH));
+    const lit = step(0.64, hash2D(vec2(colId, rowId)));
+    const glass = vec3(0.12, 0.18, 0.26);
+    const warm = vec3(0.72, 0.58, 0.36);
+    const paneCol = mix(glass, warm, lit.mul(0.85));
+    const mullion = vec3(0.55, 0.57, 0.60);
+    const upper = mix(mullion, paneCol, frame.pane);
+    const roofCol = vec3(0.40, 0.41, 0.43);
+    return mix(mix(upper, podiumCol, frame.podium), roofCol, frame.roof);
   })();
+
+  mat.roughnessNode = Fn(() => {
+    const frame = midbandFrame();
+    const stone = mix(float(0.9), float(0.46), frame.signBand);
+    const glazing = mix(float(0.62), float(0.32), frame.pane);
+    const face = mix(glazing, stone, frame.podium);
+    return mix(face, float(0.94), frame.roof);
+  })();
+
+  mat.metalnessNode = Fn(() => {
+    const frame = midbandFrame();
+    const glass = frame.pane.mul(float(1.0).sub(frame.podium)).mul(0.08);
+    const mouth = frame.podium.mul(float(1.0).sub(frame.pier)).mul(float(1.0).sub(frame.signBand)).mul(float(1.0).sub(frame.plinth)).mul(0.05);
+    return glass.add(mouth).mul(float(1.0).sub(frame.roof));
+  })();
+
+  mat.emissiveNode = Fn(() => {
+    const frame = midbandFrame();
+    const night = smoothstep(0.35, 1.3, cityUniforms.uInteriorGlow);
+    const signCol = signColor(frame.slot);
+    const signGlow = signCol.mul(frame.signBand).mul(frame.wall).mul(night.mul(0.75).add(0.18));
+    const colId = floor(frame.along.div(winBay));
+    const rowId = floor(frame.rise.div(storeyH));
+    const lit = step(0.64, hash2D(vec2(colId, rowId)));
+    const warm = vec3(0.95, 0.72, 0.40);
+    const windowGlow = warm.mul(frame.pane).mul(lit).mul(float(1.0).sub(frame.podium)).mul(frame.wall).mul(night).mul(0.55);
+    return signGlow.add(windowGlow);
+  })();
+
   _midbandCanyon = mat;
   return mat;
 }

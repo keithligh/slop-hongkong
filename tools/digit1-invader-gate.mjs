@@ -396,8 +396,9 @@ function rayOutsideMidband(target) {
 }
 
 // Chartless mid-band canyon. The measured PlanD centroids yield. The replacement
-// is the limestone plate wall, not a blank omit onto curtain at ~650 m.
-// Soft centre_low and the right apron stay. BoC and Henderson rays stay clear.
+// is the footprint plate wall, not a blank omit onto curtain at ~650 m.
+// The face of that wall is digit1MidbandFacadeFidelity. Soft centre_low and the
+// right apron stay. BoC and Henderson rays stay clear.
 export function digit1MidbandCanyonFidelity(sources) {
   const right = { x: 84.93, y: 14.7, z: 77.32 };
   const up = { x: 80.89, y: 18.31, z: 71.08 };
@@ -458,6 +459,39 @@ export function digit1MidbandCanyonFidelity(sources) {
   return true;
 }
 
+// Chartless mid-band face. No Active ring covers the plates, so this is not a
+// BUILDING photograph. The stand-in is a two-storey opaque shopfront and a
+// window grid above it. Flat stone courses, the orange atlas, corridor ashlar,
+// and curtain glass to the pavement fail. Sleeping Dogs is not this bar.
+export function digit1MidbandFacadeFidelity(sources) {
+  const materials = sources?.materials || '';
+  const start = materials.indexOf('function createMidbandCanyonMaterial');
+  const end = materials.indexOf('export {', start);
+  const body = start >= 0 && end > start ? materials.slice(start, end) : '';
+  if (!/mat\.name = 'hkMidbandCanyon'/.test(body)) return false;
+  if (!/HK_RETAIL_BELT/.test(body)) return false;
+  if (!/HK_STREET_EYE/.test(body)) return false;
+  if (!/const podium/.test(body)) return false;
+  if (!/shopMouth/.test(body)) return false;
+  if (!/signBand/.test(body)) return false;
+  if (!/mullion/.test(body)) return false;
+  if (!/const pane/.test(body)) return false;
+  if (!/storey/.test(body)) return false;
+  if (!/emissiveNode/.test(body)) return false;
+  if (!/roughnessNode/.test(body)) return false;
+  if (!/mix\(upper, podiumCol, frame\.podium\)/.test(body)) return false;
+  if (/vec3\(0\.76,\s*0\.69,\s*0\.58\)/.test(body)) return false;
+  if (/y\.mul\(0\.46\)/.test(body)) return false;
+  if (/hkShopfrontAlbedo|0x8a847c|createCurtainWallMaterial|hkTowerGlass|podiumStreetColor/.test(body)) return false;
+  const buildings = sources?.buildings || '';
+  if (!/mesh\.userData\.hkSource = 'footprint'/.test(buildings)) return false;
+  if (!/new THREE\.BoxGeometry/.test(buildings)) return false;
+  if (!/plandMode === 'compare'/.test(buildings)) return false;
+  if (/hkShopfrontAlbedo|hkCorridorPodiumFill/.test(buildings)) return false;
+  if (DIGIT1_MIDBAND_PLATES.length !== 2) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -509,7 +543,8 @@ export function digit1InvaderGate(root) {
     digit1FarFlankFidelity: digit1FarFlankFidelity(),
     digit1BocPlateOwned: digit1BocPlateOwned(sources),
     digit1BocPrismFidelity: digit1BocPrismFidelity(sources),
-    digit1MidbandCanyonFidelity: digit1MidbandCanyonFidelity(sources)
+    digit1MidbandCanyonFidelity: digit1MidbandCanyonFidelity(sources),
+    digit1MidbandFacadeFidelity: digit1MidbandFacadeFidelity(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -526,6 +561,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1BocPlateOwned === true
     && bars.digit1BocPrismFidelity === true
     && bars.digit1MidbandCanyonFidelity === true
+    && bars.digit1MidbandFacadeFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

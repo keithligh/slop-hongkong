@@ -612,6 +612,7 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1BocPlateOwned, true);
   assert.equal(gate.digit1BocPrismFidelity, true);
   assert.equal(gate.digit1MidbandCanyonFidelity, true);
+  assert.equal(gate.digit1MidbandFacadeFidelity, true);
   assert.equal(gate.pass, true);
 });
 
