@@ -5,6 +5,7 @@ import {
   BLOCKS,
   HK_CORE_BBOX,
   HK_NULL_HEIGHT,
+  HK_RETAIL_BELT,
   blockInHkCore,
   hkFootprintHeight,
   hkLandmarkOwnsShaft,
@@ -12,7 +13,7 @@ import {
   hkRetailSlices,
   hkScaleRing
 } from './city-config.js';
-import { createCurtainWallMaterial, createPodiumMasonryMaterial, createRetailPodiumMaterial } from './tsl-materials.js';
+import { createCorridorPodiumFillMaterial, createCurtainWallMaterial, createPodiumMasonryMaterial, createRetailPodiumMaterial } from './tsl-materials.js';
 
 // LandsD footprint ring extruded to TopHeight − BaseHeight. Same shape path as
 // createExtrudedPolygonMesh in city-grid.js: outline in (x, −z), depth along Y.
@@ -130,23 +131,27 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
   const glass = {
     ...hkCurtainMaterials(),
     podium: createPodiumMasonryMaterial(),
-    retail: createRetailPodiumMaterial()
+    retail: createRetailPodiumMaterial(),
+    corridor: createCorridorPodiumFillMaterial()
   };
   const batches = {
     podium: [],
     tower0: [],
     tower1: [],
     tower2: [],
-    retail: []
+    retail: [],
+    corridor: []
   };
   let extruded = 0;
   let podiumTowers = 0;
+  let corridorPodium = 0;
   let skippedOutside = 0;
   let skippedNull = 0;
   let skippedDegenerate = 0;
   let skippedOwned = 0;
   let skippedGltf = 0;
   const hiddenIds = gltfPlan?.hiddenIds instanceof Set ? gltfPlan.hiddenIds : null;
+  const podiumFillIds = gltfPlan?.podiumFillIds instanceof Set ? gltfPlan.podiumFillIds : null;
   const flush = (key) => {
     const batch = batches[key];
     if (!batch.length) return;
@@ -156,7 +161,7 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
     if (!merged) return;
     merged.computeBoundingSphere();
     const mesh = new THREE.Mesh(merged, glass[key]);
-    mesh.name = key === 'retail' ? 'HkRetailPodium' : key === 'podium' ? 'HkPodiumMasonry' : 'HkCurtainWall';
+    mesh.name = key === 'retail' ? 'HkRetailPodium' : key === 'podium' ? 'HkPodiumMasonry' : key === 'corridor' ? 'HkCorridorPodiumFill' : 'HkCurtainWall';
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
@@ -182,6 +187,22 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
       // or the individualised glTF when that mesh covers the plate. A square extrude
       // would hide either one.
       skippedOwned++;
+      continue;
+    }
+    // PlanD donor: the tower stays hidden. The near right plate emits only the
+    // retail belt, in chart ashlar, so a null-fill hole has footprint mass.
+    // The shopfront atlas is not used. No axis-aligned collider: the HSBC box
+    // reaches the carriageway even though the ring does not.
+    if (podiumFillIds && podiumFillIds.has(b.id)) {
+      const beltH = Math.min(h, HK_RETAIL_BELT - ISLAND_BOUNDS.sidewalkHeight);
+      const ring = ringForExtrude(b.poly);
+      const geo = beltH > 0.4 && ring ? tryExtrudeHk(ring, beltH, 0) : null;
+      if (!geo) {
+        skippedDegenerate++;
+        continue;
+      }
+      queue('corridor', geo);
+      corridorPodium++;
       continue;
     }
     if (hiddenIds && hiddenIds.has(b.id)) {
@@ -264,6 +285,7 @@ function buildHkFootprintBlocks(scene, gltfPlan = null) {
     `null height ${HK_NULL_HEIGHT} ${skippedNull}; ` +
     `landmark shaft ${skippedOwned}; ` +
     `gltf hidden ${skippedGltf}; ` +
+    `corridor podium ${corridorPodium}; ` +
     `outside core skipped ${skippedOutside}; degenerate ${skippedDegenerate}` +
     (named.length ? `; ${named.map((block) => `${block.id} ${block.maxH}m`).join('; ')}` : '')
   );

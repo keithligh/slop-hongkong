@@ -189,8 +189,8 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   return { geo: finishBaked(next), landsd, shell, podium, kept: written };
 }
 
-export function hidePlandCorridorExtrudes(gltfPlan) {
-  return withPlandCorridorHidden(gltfPlan, BLOCKS);
+export function hidePlandCorridorExtrudes(gltfPlan, options) {
+  return withPlandCorridorHidden(gltfPlan, BLOCKS, options);
 }
 
 export async function preparePlandCorridor(href) {

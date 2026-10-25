@@ -1995,6 +1995,38 @@ function podiumShopGlow() {
   return vec3(1.0, 0.72, 0.38).mul(shop).mul(below).mul(wall).mul(night).mul(0.45);
 }
 
+// Chart ashlar for the Digit1 right-hand footprint belt while PlanD is mounted.
+// Horizontal courses only. No shop mouth, no sign band, no hkShopfrontAlbedo.
+// createRetailPodiumMaterial and createPodiumMasonryMaterial stay on the atlas.
+function corridorPodiumFillColor() {
+  const y = positionWorld.y;
+  const vertical = float(1.0).sub(step(0.72, abs(normalWorld.y)));
+  const course = fract(y.mul(1.7));
+  const mortar = smoothstep(0.0, 0.025, course).mul(float(1.0).sub(smoothstep(0.04, 0.08, course)));
+  const stone = color(0x8a847c);
+  const joint = color(0x6e6962);
+  return mix(stone, joint, mortar.mul(vertical).mul(0.28));
+}
+
+let _corridorPodium = null;
+function createCorridorPodiumFillMaterial() {
+  if (_corridorPodium) return _corridorPodium;
+  const mat = new THREE.MeshStandardNodeMaterial({
+    roughness: 0.92,
+    metalness: 0.02
+  });
+  mat.name = 'hkCorridorPodiumFill';
+  // Same depth bias as the PlanD donor: a LandsD photograph stays in front,
+  // and a null-fill hole shows this plate.
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = 1;
+  mat.polygonOffsetUnits = 1;
+  mat.aoNode = canyonSkyAONode();
+  mat.colorNode = Fn(() => corridorPodiumFillColor())();
+  _corridorPodium = mat;
+  return mat;
+}
+
 /**
  * Opaque shopfront for extrude and canyon gaps that have no LandsD mesh yet.
  * The albedo is hkShopfrontAlbedo (plinth, shop mouth, tile, sign band).
@@ -2035,6 +2067,7 @@ export {
   cityUniforms,
   WALL_KINDS,
   createCurtainWallMaterial,
+  createCorridorPodiumFillMaterial,
   createRetailPodiumMaterial,
   createPodiumMasonryMaterial,
   createCarPaintMaterial,
