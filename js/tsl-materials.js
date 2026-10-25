@@ -501,10 +501,11 @@ function createCurtainWallMaterial(opts = {}) {
     glassMetalness = 0.72,
     glassRoughness = 0.05,
     seed = 1.0,
-    boxLocal = false
+    boxLocal = false,
+    quietGlass = false
   } = opts;
 
-  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${reflectionFloor}_${glassMetalness}_${glassRoughness}_${seed}_${boxLocal}`;
+  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${reflectionFloor}_${glassMetalness}_${glassRoughness}_${seed}_${boxLocal}_${quietGlass ? 1 : 0}`;
   if (_curtainWallCache.has(cacheKey)) {
     return _curtainWallCache.get(cacheKey);
   }
@@ -550,6 +551,19 @@ function createCurtainWallMaterial(opts = {}) {
   const isMechFloor = float(1.0).sub(step(1.0, mod(floorIdx.add(uSeed), 16.0))).mul(step(4.0, floorIdx));
 
   mat.colorNode = Fn(() => {
+    // Broad dielectric panes. The Bank of China diagrid is mesh, not this mullion hash.
+    if (quietGlass) {
+      const viewDir = normalize(cameraPosition.sub(positionWorld));
+      const nPane = normalize(normalWorldGeometry);
+      const fresnel = pow(clamp(float(1.0).sub(abs(dot(viewDir, nPane))), 0.0, 1.0), 2.1);
+      const reflectDir = reflect(viewDir.negate(), nPane);
+      const reflectElev = clamp(reflectDir.y.mul(0.65).add(0.38), 0.0, 1.0);
+      const skyReflect = mix(cityUniforms.uSkyHorizonColor, cityUniforms.uSkyTopColor, clamp(reflectElev.mul(1.4), 0.0, 1.0));
+      const glassColor = mix(cGlass, skyReflect, fresnel.mul(uReflectivity).add(uReflectionFloor));
+      if (boxLocal) return glassColor;
+      const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
+      return mix(glassColor, podiumStreetColor(), onPodium);
+    }
     // No glass in a storey the box cuts short (solid spandrel instead) nor behind the coping
     const isGlassPane = filteredPulse(cellUV.x, mullionThickness * 0.5, 1.0 - mullionThickness * 0.5, fw.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.015, 1.0 - mullionThickness * 0.5, fw.y))
@@ -632,6 +646,11 @@ function createCurtainWallMaterial(opts = {}) {
   })();
 
   mat.roughnessNode = Fn(() => {
+    if (quietGlass) {
+      if (boxLocal) return uGlassRough;
+      const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
+      return mix(uGlassRough, float(0.9), onPodium);
+    }
     const isFrame = float(1.0).sub(
       filteredPulse(cellUV.x, mullionThickness, 1.0 - mullionThickness, fw.x).mul(filteredPulse(cellUV.y, spandrelRatio, 1.0, fw.y))
     );
@@ -645,14 +664,20 @@ function createCurtainWallMaterial(opts = {}) {
 
   // Glass & metal above the belt. The shopfront is stone, not a metal curtain.
   mat.metalnessNode = Fn(() => {
+    if (quietGlass) {
+      if (boxLocal) return uGlassMetal;
+      const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
+      return mix(uGlassMetal, float(0.02), onPodium);
+    }
     const glassMetal = mix(uGlassMetal, float(0.0), blank);
     if (boxLocal) return glassMetal;
     const onPodium = float(1.0).sub(step(float(HK_RETAIL_BELT), positionWorld.y));
     return mix(glassMetal, float(0.02), onPodium);
   })();
 
-  // Hardware derivative bumpNormal for raised curtain-wall mullions & spandrel channels (ramps >= 2px, see pre-war)
-  mat.normalNode = Fn(() => {
+  // Hardware derivative bumpNormal for raised curtain-wall mullions & spandrel channels (ramps >= 2px, see pre-war).
+  // Quiet panes keep the geometric normal.
+  if (!quietGlass) mat.normalNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
     const detailFade = float(1.0).sub(smoothstep(18.0, 140.0, camDist)).mul(float(1.0).sub(isRoof))
       .mul(float(1.0).sub(smoothstep(0.03, 0.1, max(fw.x, fw.y))));
@@ -669,6 +694,7 @@ function createCurtainWallMaterial(opts = {}) {
   })();
 
   mat.emissiveNode = Fn(() => {
+    if (quietGlass) return vec3(0.0, 0.0, 0.0);
     const inPane = filteredPulse(cellUV.x, mullionThickness + 0.015, 1.0 - mullionThickness - 0.015, fw.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.02, 1.0 - mullionThickness * 0.5, fw.y));
     const paneMask = inPane.mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(isMechFloor)).mul(float(1.0).sub(blank))

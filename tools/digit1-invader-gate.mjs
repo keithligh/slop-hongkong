@@ -10,7 +10,15 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, ISLAND_BOUNDS, ROADS } from '../js/city-config.js';
+import {
+  BLOCKS,
+  HK_RETAIL_BELT,
+  HK_STREET_EYE,
+  ISLAND_BOUNDS,
+  ROADS,
+  hkPlanCorners,
+  hkResolveLandmarks
+} from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
 import { NULL_FILL_EDGE, boxClosestDistance, gltfAlbedoSampler } from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
@@ -254,8 +262,8 @@ export function digit1FarFlankFidelity() {
 // Chartless BoC Tower plate. The right_mid second hit at tip 17419de sits
 // inside the LandsD ring. That centroid yields. The mast above the prism peak
 // stays. The flank-chart punch does not grow to cover this plate, and a
-// neighbour in the bounding-box wedge is not the plate. The prism on those
-// corners is the Digit1-eye face: multi-bay diagrid, dielectric glass.
+// neighbour in the bounding-box wedge is not the plate. Face readability is
+// digit1BocPrismFidelity, not this ownership bar.
 export function digit1BocPlateOwned(sources) {
   const tower = digit1BocTowerPlate();
   if (!tower) return false;
@@ -289,6 +297,82 @@ export function digit1BocPlateOwned(sources) {
   if (/reflectivity: 0\.96/.test(bocSrc)) return false;
   if (/mapillary/i.test(bocSrc)) return false;
   if (/hkShopfrontAlbedo/.test(bocSrc)) return false;
+  return true;
+}
+
+// The Digit1 eye looks straight at the short west shaft (fraction 0.33). The
+// tall glass is the radial faces of the other shafts. Those faces carry the
+// white X. The glass is dielectric panes, not the fine mullion hash.
+function digit1BocEyeFace() {
+  const { placed } = hkResolveLandmarks();
+  const site = placed.find((item) => item.id === 'boc');
+  if (!site?.block) return null;
+  const block = site.block;
+  const corners = hkPlanCorners(block.poly, block.cx, block.cz);
+  if (corners.length !== 4) return null;
+  let north = 0;
+  let northZ = Infinity;
+  for (let i = 0; i < corners.length; i++) {
+    const mz = (corners[i].z + corners[(i + 1) % corners.length].z) / 2;
+    if (mz < northZ) {
+      northZ = mz;
+      north = i;
+    }
+  }
+  const fractions = [1, 0.76, 0.51, 0.33];
+  const fx = Math.sin(HK_STREET_EYE.heading);
+  const fz = Math.cos(HK_STREET_EYE.heading);
+  const center = { x: block.cx, z: block.cz };
+  let best = null;
+  for (let step = 0; step < 4; step++) {
+    const a = corners[(north + step) % 4];
+    const b = corners[(north + step + 1) % 4];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const len = Math.hypot(dx, dz) || 1;
+    let nx = -dz / len;
+    let nz = dx / len;
+    const mx = (a.x + b.x) / 2;
+    const mz = (a.z + b.z) / 2;
+    if ((mx + nx - center.x) * nx + (mz + nz - center.z) * nz < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    const facing = nx * fx + nz * fz;
+    if (!best || facing < best.facing) best = { facing, fraction: fractions[step], edge: len };
+  }
+  return best;
+}
+
+export function digit1BocPrismFidelity(sources) {
+  const landmarks = sources?.landmarks || '';
+  const bocSrc = landmarks.slice(landmarks.indexOf('function addBankOfChina'), landmarks.indexOf('function addJardine'));
+  if (!/const fractions = \[1, 0\.76, 0\.51, 0\.33\]/.test(bocSrc)) return false;
+  if (!/hkPlanCorners\(block\.poly, block\.cx, block\.cz\)/.test(bocSrc)) return false;
+  if (!/glassMetalness: 0/.test(bocSrc)) return false;
+  if (!/glassRoughness: 0\.48/.test(bocSrc)) return false;
+  if (!/reflectionFloor: 0\.04/.test(bocSrc)) return false;
+  if (!/reflectivity: 0\.22/.test(bocSrc)) return false;
+  if (!/glassTint: 0x7aa3c2/.test(bocSrc)) return false;
+  if (/reflectivity: 0\.96/.test(bocSrc)) return false;
+  if (/glassMetalness: 0\.72/.test(bocSrc)) return false;
+  if (/mapillary/i.test(bocSrc)) return false;
+  if (/hkShopfrontAlbedo/.test(bocSrc)) return false;
+  if (!/createRetailPodiumMaterial\(\)/.test(bocSrc)) return false;
+  if (!/quietGlass: true/.test(bocSrc)) return false;
+  if (!/quietGlass = false/.test(sources?.materials || '')) return false;
+  if (!/Math\.max\(2, Math\.round\(rise \/ 52\)\)/.test(bocSrc)) return false;
+  if (!/emissiveIntensity: 0\.7/.test(bocSrc)) return false;
+  if (!/metalness: 0\.04/.test(bocSrc)) return false;
+  if (!/const member = 4\.6/.test(bocSrc)) return false;
+  if (!/braceShaftFace\(a, b,/.test(bocSrc)) return false;
+  if (!/braceShaftFace\(a, center,/.test(bocSrc)) return false;
+  if (!/braceShaftFace\(b, center,/.test(bocSrc)) return false;
+  const eyeFace = digit1BocEyeFace();
+  if (!eyeFace) return false;
+  if (Math.abs(eyeFace.facing + 1) > 0.05) return false;
+  if (eyeFace.fraction !== 0.33) return false;
+  if (!(eyeFace.edge > 40 && eyeFace.edge < 70)) return false;
   return true;
 }
 
@@ -341,7 +425,8 @@ export function digit1InvaderGate(root) {
     digit1FlankMeltGone: digit1FlankMeltGone(),
     digit1CanyonDensity: digit1CanyonDensity(sources, plan),
     digit1FarFlankFidelity: digit1FarFlankFidelity(),
-    digit1BocPlateOwned: digit1BocPlateOwned(sources)
+    digit1BocPlateOwned: digit1BocPlateOwned(sources),
+    digit1BocPrismFidelity: digit1BocPrismFidelity(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -356,6 +441,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1CanyonDensity === true
     && bars.digit1FarFlankFidelity === true
     && bars.digit1BocPlateOwned === true
+    && bars.digit1BocPrismFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

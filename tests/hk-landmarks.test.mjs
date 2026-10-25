@@ -104,6 +104,12 @@ test('Bank of China corners stay on its LandsD footprint and only that shaft is 
   assert.match(bocSrc, /Math\.max\(2, Math\.round\(rise \/ 52\)\)/);
   assert.match(bocSrc, /emissiveIntensity: 0\.7/);
   assert.match(bocSrc, /metalness: 0\.04/);
+  assert.match(bocSrc, /quietGlass: true/);
+  assert.match(bocSrc, /const fractions = \[1, 0\.76, 0\.51, 0\.33\]/);
+  assert.match(bocSrc, /const member = 4\.6/);
+  assert.match(bocSrc, /braceShaftFace\(a, b,/);
+  assert.match(bocSrc, /braceShaftFace\(a, center,/);
+  assert.match(bocSrc, /braceShaftFace\(b, center,/);
   assert.match(bocSrc, /addPrism\(group, skirt, a, b, center, ground, ground, ground, ySkirt, ySkirt, ySkirt\)/);
   assert.match(bocSrc, /addPrism\(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter\)/);
   assert.doesNotMatch(bocSrc, /const y0 = ground/);

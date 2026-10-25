@@ -142,10 +142,10 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
   const mastH = 52.4;
   const ySkirt = HK_RETAIL_BELT;
   const skirt = createRetailPodiumMaterial();
-  // No individualised BUILDING mesh on this plate (11-SW-9C / 8D / 9D / 10C / 8C).
-  // The prism stays on the LandsD corners. Metalness 0.72 with a 0.18 reflection
-  // floor is a chrome skin. Dielectric glass keeps the diagrid. The tint is light
-  // enough that a ~230 m street eye reads blue glass, not a black plate.
+  // No BUILDING glTF meets this plate (11-SW-9C / 8D / 9D / 10C / 8C).
+  // Digit1 looks at the short west shaft and at the radial faces of the taller
+  // shafts. An X only on the outer square edge leaves that glass as a tinted slab.
+  // quietGlass drops the fine mullion hash. Metalness stays 0: not a chrome skin.
   const face = createCurtainWallMaterial({
     glassTint: 0x7aa3c2,
     frameTint: 0xd5dee6,
@@ -158,16 +158,15 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
     glassMetalness: 0,
     glassRoughness: 0.48,
     seed: 4.2,
-    boxLocal: false
+    boxLocal: false,
+    quietGlass: true
   });
   face.polygonOffset = true;
   face.polygonOffsetFactor = 1;
   face.polygonOffsetUnits = 1;
-  // One full-height X is a pair of ~1 m lines. At the Digit1 eye that is a dark
-  // slab. A bay about every 52 m, a few metres thick, is the same diagrid at a
-  // size that plate can show. Emissive keeps the member in shade. Metalness stays
-  // near zero, so this is not a chrome skin.
-  const braceMat = hkMat(0xe8eef2, { metalness: 0.04, roughness: 0.46, emissive: 0xc9d3da, emissiveIntensity: 0.7 });
+  // One bay about every 52 m. A 4.6 m white member reads at ~210 m. Emissive
+  // keeps it in shade. Metalness stays near zero, so this is not a chrome skin.
+  const braceMat = hkMat(0xf7f9fb, { metalness: 0.04, roughness: 0.42, emissive: 0xf4f7fa, emissiveIntensity: 0.7 });
   braceMat.polygonOffset = true;
   braceMat.polygonOffsetFactor = -2;
   braceMat.polygonOffsetUnits = -2;
@@ -185,6 +184,51 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
     const y = ground + block.height * fractions[step];
     return step === 0 ? y + peak : y;
   };
+  // Proud of the glass, on the outside of each triangular face. The Digit1
+  // eye's tall glass is the radial faces (corner to centre), not the outer
+  // square edges of the north and south shafts.
+  const yBraceBase = ground + 12;
+  const member = 4.6;
+  const proud = member * 0.5 + 0.55;
+  const outwardOf = (p, q, away) => {
+    const dx = q.x - p.x;
+    const dz = q.z - p.z;
+    const len = Math.hypot(dx, dz) || 1;
+    let nx = -dz / len;
+    let nz = dx / len;
+    const mx = (p.x + q.x) / 2;
+    const mz = (p.z + q.z) / 2;
+    if ((mx + nx - away.x) * nx + (mz + nz - away.z) * nz < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    return { x: nx, z: nz };
+  };
+  const braceShaftFace = (p, q, yP, yQ, away) => {
+    const n = outwardOf(p, q, away);
+    const px = p.x + n.x * proud;
+    const pz = p.z + n.z * proud;
+    const qx = q.x + n.x * proud;
+    const qz = q.z + n.z * proud;
+    const topP = yP - 4;
+    const topQ = yQ - 4;
+    const rise = Math.min(topP, topQ) - yBraceBase;
+    if (rise > 20) {
+      const bays = Math.max(2, Math.round(rise / 52));
+      for (let bay = 0; bay < bays; bay++) {
+        const t0 = bay / bays;
+        const t1 = (bay + 1) / bays;
+        const yLoP = yBraceBase + (topP - yBraceBase) * t0;
+        const yHiP = yBraceBase + (topP - yBraceBase) * t1;
+        const yLoQ = yBraceBase + (topQ - yBraceBase) * t0;
+        const yHiQ = yBraceBase + (topQ - yBraceBase) * t1;
+        addBocBeam(px, yLoP, pz, qx, yHiQ, qz, member);
+        addBocBeam(qx, yLoQ, qz, px, yHiP, pz, member);
+        addBocBeam(px, yHiP, pz, qx, yHiQ, qz, member * 0.72);
+      }
+    }
+    addBocBeam(px, yP, pz, qx, yQ, qz, 3.2);
+  };
   for (let step = 0; step < 4; step++) {
     const a = corners[(north + step) % 4];
     const b = corners[(north + step + 1) % 4];
@@ -195,21 +239,9 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
     tagBoc();
     addPrism(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter);
     tagBoc();
-    const yBrace0 = ground + 12;
-    const yBrace1 = yOuter - 6;
-    const rise = yBrace1 - yBrace0;
-    if (rise > 20) {
-      const bays = Math.max(2, Math.round(rise / 52));
-      const thick = 2.8;
-      for (let bay = 0; bay < bays; bay++) {
-        const yLo = yBrace0 + (rise * bay) / bays;
-        const yHi = yBrace0 + (rise * (bay + 1)) / bays;
-        addBocBeam(a.x, yLo, a.z, b.x, yHi, b.z, thick);
-        addBocBeam(b.x, yLo, b.z, a.x, yHi, a.z, thick);
-        addBocBeam(a.x, yHi, a.z, b.x, yHi, b.z, thick * 0.72);
-      }
-      addBocBeam(a.x, yOuter, a.z, b.x, yOuter, b.z, 2.4);
-    }
+    braceShaftFace(a, b, yOuter, yOuter, center);
+    braceShaftFace(a, center, yOuter, yCenter, b);
+    braceShaftFace(b, center, yOuter, yCenter, a);
     if (step === 0) {
       const mx = (a.x + b.x) / 2;
       const mz = (a.z + b.z) / 2;
@@ -228,8 +260,9 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
   for (let k = 0; k < 4; k++) {
     const corner = corners[(north + k) % 4];
     const yPost = Math.max(edgeTop(k), edgeTop((k + 3) % 4));
-    addBocBeam(corner.x, ySkirt, corner.z, corner.x, yPost, corner.z, 2.2);
+    addBocBeam(corner.x, ySkirt, corner.z, corner.x, yPost, corner.z, member * 0.72);
   }
+  addBocBeam(center.x, ySkirt, center.z, center.x, ground + block.height, center.z, member * 0.78);
   colliders.push({
     minX: block.minX,
     maxX: block.maxX,
