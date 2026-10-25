@@ -11,7 +11,6 @@ import {
   PLAND_DATASET,
   PLAND_LANDSD_SKIRT,
   PLAND_PAGE_TEX_EDGE,
-  PLAND_PODIUM_ABOVE_BELT,
   PLAND_PODIUM_FACE,
   PLAND_PODIUM_RIGHT,
   plandOmitsPodiumInsideLandsd,
@@ -313,10 +312,9 @@ test('PlanD yields on the street side of Henderson and keeps the mid-street phot
   assert.equal(plandYieldsToLandsd({ x: 190, y: 31.7, z: 91.1 }, boxes), false);
 });
 
-test('PlanD omits a near LandsD podium interior and keeps the roof, the far box, and the skirt', () => {
+test('PlanD omits inside a near LandsD box at every height and keeps a far box', () => {
   assert.equal(HK_STREET_NEAR, 80);
   assert.equal(PLAND_PODIUM_FACE, 0.5);
-  assert.equal(PLAND_PODIUM_ABOVE_BELT, 1);
   assert.ok(Math.abs(HK_RETAIL_BELT - 8.02) < 1e-9, HK_RETAIL_BELT);
   // 11-SW-8D street wall. The Des Voeux eye sits on its north face.
   const b34475 = { minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 };
@@ -328,8 +326,10 @@ test('PlanD omits a near LandsD podium interior and keeps the roof, the far box,
     { x: HK_STREET_EYE.x, y: 5, z: 29.25 },
     [b34475]
   ), true);
-  const roof = { x: 2, y: HK_RETAIL_BELT + PLAND_PODIUM_ABOVE_BELT, z: 40 };
-  assert.equal(plandOmitsPodiumInsideLandsd(roof, [b34475]), false);
+  const aboveBelt = { x: 2, y: HK_RETAIL_BELT + 12, z: 40 };
+  assert.equal(plandOmitsPodiumInsideLandsd(aboveBelt, [b34475]), true);
+  const roof = { x: 2, y: HK_RETAIL_BELT + 40, z: 40 };
+  assert.equal(plandOmitsPodiumInsideLandsd(roof, [b34475]), true);
   assert.equal(plandOmitsPodiumInsideLandsd({ ...southPodium, y: HK_RETAIL_BELT + 0.99 }, [b34475]), true);
   // Half a metre of lot face is the same omit. Farther out, this helper stays quiet.
   assert.equal(plandOmitsPodiumInsideLandsd(
@@ -338,6 +338,14 @@ test('PlanD omits a near LandsD podium interior and keeps the roof, the far box,
   ), true);
   assert.equal(plandOmitsPodiumInsideLandsd(
     { x: HK_STREET_EYE.x, y: 4, z: b34475.minZ - 0.6 },
+    [b34475]
+  ), false);
+  assert.equal(plandOmitsPodiumInsideLandsd(
+    { x: HK_STREET_EYE.x, y: HK_RETAIL_BELT + 12, z: b34475.minZ - 0.4 },
+    [b34475]
+  ), true);
+  assert.equal(plandOmitsPodiumInsideLandsd(
+    { x: HK_STREET_EYE.x, y: HK_RETAIL_BELT + 12, z: b34475.minZ - 0.6 },
     [b34475]
   ), false);
   const nearLot = { minX: 20, maxX: 40, minZ: 20, maxZ: 50, minH: 4, maxH: 40 };
@@ -349,12 +357,15 @@ test('PlanD omits a near LandsD podium interior and keeps the roof, the far box,
   const atDisc = { minX: HK_STREET_EYE.x + HK_STREET_NEAR, maxX: 120, minZ: HK_STREET_EYE.z, maxZ: 50 };
   assert.equal(boxClosestDistance(atDisc, HK_STREET_EYE), HK_STREET_NEAR);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 90, y: 4, z: 35 }, [atDisc]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 90, y: HK_RETAIL_BELT + 20, z: 35 }, [atDisc]), true);
   const pastDisc = { minX: HK_STREET_EYE.x + HK_STREET_NEAR + 0.1, maxX: 160, minZ: HK_STREET_EYE.z, maxZ: 50 };
   assert.ok(boxClosestDistance(pastDisc, HK_STREET_EYE) > HK_STREET_NEAR);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 100, y: 4, z: 35 }, [pastDisc]), false);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 100, y: HK_RETAIL_BELT + 20, z: 35 }, [pastDisc]), false);
   const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
   assert.ok(boxClosestDistance(henderson, HK_STREET_EYE) > HK_STREET_NEAR);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 230, y: 4, z: 80 }, [henderson]), false);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 230, y: HK_RETAIL_BELT + 40, z: 80 }, [henderson]), false);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [henderson]), false);
   assert.equal(plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [henderson]), true);
   assert.equal(plandOmitsPodiumInsideLandsd(null, [b34475]), false);
@@ -365,7 +376,8 @@ test('PlanD omits a near LandsD podium interior and keeps the roof, the far box,
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
   const streets = readFileSync(path.join(root, 'js/street-details.js'), 'utf8');
   assert.match(page, /plandOmitsPodiumInsideLandsd/);
-  assert.match(page, /podium triangles inside near LandsD boxes/);
+  assert.match(page, /triangles inside near LandsD boxes/);
+  assert.doesNotMatch(page, /podium triangles inside near LandsD boxes/);
   assert.match(page, /const boxes = donor \? landsdBoxes : \[\]/);
   assert.doesNotMatch(page, /hkShopfrontAlbedo/);
   assert.match(gltf, /omitLandsdNullFill/);

@@ -113,8 +113,9 @@ function finishBaked(geo) {
 // of a loaded box is the 2017 shell in front of that photograph. Compare keeps
 // that skirt off, and the near-podium omit with it, because no LandsD boxes
 // are passed. The carriageway shell is both modes. It is the low aerial
-// triangles on Des Voeux that the 1.2 m carpet test kept. The podium omit is
-// the centre inside a near box, below the retail band, after those two tests.
+// triangles on Des Voeux that the 1.2 m carpet test kept. The near-box omit is
+// the centre inside a near box at any height, after those two tests. A far box
+// is not punched.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
   if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0 };
@@ -270,6 +271,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   console.info(formatPlandLog({ ...plan, triangles }));
   if (yielded) console.info(`[pland] omitted ${yielded} triangles on the street side of a LandsD box`);
   if (shell) console.info(`[pland] omitted ${shell} low triangles on the Des Voeux carriageway`);
-  if (podium) console.info(`[pland] omitted ${podium} podium triangles inside near LandsD boxes`);
+  if (podium) console.info(`[pland] omitted ${podium} triangles inside near LandsD boxes`);
   return { loaded, failed, triangles, yielded, shell, podium, group };
 }

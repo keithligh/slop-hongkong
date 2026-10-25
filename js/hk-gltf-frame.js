@@ -304,6 +304,24 @@ export function clampLandsdAnisotropy(requested, limit = 16) {
   return Math.max(1, Math.min(Math.floor(ask), Math.floor(cap)));
 }
 
+// CPU sheet used only to classify padding. 256 on a 4096 atlas averaged a
+// chart edge into the grey fill and dropped real south-lot faces (B34475).
+// 1024 keeps that edge. The GPU upload is a different path. Pale padding
+// is still a hole. Consensus stays corners-null or centroid-null.
+export const NULL_FILL_EDGE = 1024;
+
+export function nullFillSampleSize(width, height, edge = NULL_FILL_EDGE) {
+  const w0 = width | 0;
+  const h0 = height | 0;
+  const cap = Number.isFinite(edge) && edge > 0 ? edge : NULL_FILL_EDGE;
+  if (!(w0 > 0) || !(h0 > 0)) return { w: 0, h: 0 };
+  const scale = Math.min(1, cap / Math.max(w0, h0));
+  return {
+    w: Math.max(1, Math.round(w0 * scale)),
+    h: Math.max(1, Math.round(h0 * scale))
+  };
+}
+
 // LandsD atlas padding. A texel this flat is not a facade photograph.
 export function isLandsdNullTexel(r, g, b) {
   if (r <= 3 && g <= 3 && b <= 3) return true;

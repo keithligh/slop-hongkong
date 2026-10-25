@@ -12,6 +12,7 @@ import {
   hk80ToWorld,
   landsdAlbedoRow,
   landsdNullFillTriangles,
+  nullFillSampleSize,
   planGltfManifest,
   resolveHkGltfRequest
 } from './hk-gltf-frame.js';
@@ -83,7 +84,6 @@ function limitPhoto(tex, maxEdge) {
 }
 
 const PHOTO_MAPS = ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap'];
-const NULL_FILL_EDGE = 256;
 
 // The device limit. Core WebGPU reports 16; an adapter that only allows 1 cannot
 // take the anisotropic taps, and a second mip without those taps only blurs.
@@ -160,9 +160,11 @@ function nullFillSheet(tex) {
     if (tex.userData) tex.userData.hkNullFillFailed = true;
     return null;
   }
-  const scale = Math.min(1, NULL_FILL_EDGE / Math.max(w0, h0));
-  const w = Math.max(1, Math.round(w0 * scale));
-  const h = Math.max(1, Math.round(h0 * scale));
+  const { w, h } = nullFillSampleSize(w0, h0);
+  if (!w || !h) {
+    tex.userData.hkNullFillFailed = true;
+    return null;
+  }
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
@@ -204,9 +206,10 @@ function triangleIndex(geo) {
   return out;
 }
 
-// Street-height triangles on LandsD null fill are omitted: every corner, or the
-// face centre. The building and its photographic charts stay. A triangle that
-// cannot be sampled stays too.
+// Triangles on LandsD null fill are omitted: every corner, or the face centre.
+// The sheet is 1024 on the long side so a chart edge is not averaged into the
+// grey fill. The building and its photographic charts stay. A triangle that
+// cannot be sampled stays too. Pale atlas faces are still holes.
 function omitLandsdNullFill(geo, material) {
   const map = albedoMap(material);
   const uv = geo.getAttribute('uv');

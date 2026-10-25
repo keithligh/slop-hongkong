@@ -19,6 +19,8 @@ import {
   isLandsdNullTexel,
   landsdAlbedoRow,
   landsdNullFillTriangles,
+  NULL_FILL_EDGE,
+  nullFillSampleSize,
   hk80GridToHk80Geog,
   hk80GridToWgs84,
   hk80ToWorld,
@@ -250,6 +252,37 @@ test('LandsD null-fill triangles drop and a photographed corner stays', () => {
   assert.equal(landsdAlbedoRow(0, 4096), 0);
   assert.equal(landsdAlbedoRow(0.727, 4096), 2977);
   assert.ok(landsdAlbedoRow(0.727, 4096) > 2048);
+});
+
+test('null-fill samples a 4096 atlas at 1024 so a chart-grey edge stays a chart', () => {
+  assert.equal(NULL_FILL_EDGE, 1024);
+  assert.deepEqual(nullFillSampleSize(4096, 4096), { w: 1024, h: 1024 });
+  assert.deepEqual(nullFillSampleSize(4096, 2048), { w: 1024, h: 512 });
+  assert.deepEqual(nullFillSampleSize(512, 256), { w: 512, h: 256 });
+  assert.deepEqual(nullFillSampleSize(0, 4096), { w: 0, h: 0 });
+  // Sixteen native texels were one sample at edge 256. Two stone texels in
+  // that bin average into LandsD padding grey. The same two texels fill a
+  // 1024 sample (four native texels) and stay the chart. Pure padding stays a hole.
+  const chart = [120, 122, 118];
+  const pad = [136, 138, 137];
+  const avg = (nChart, nPad) => {
+    const n = nChart + nPad;
+    return [
+      Math.round((chart[0] * nChart + pad[0] * nPad) / n),
+      Math.round((chart[1] * nChart + pad[1] * nPad) / n),
+      Math.round((chart[2] * nChart + pad[2] * nPad) / n)
+    ];
+  };
+  const smear256 = avg(2, 14);
+  const keep1024 = avg(4, 0);
+  const mixed1024 = avg(3, 1);
+  assert.equal(isLandsdNullTexel(smear256[0], smear256[1], smear256[2]), true);
+  assert.equal(isLandsdNullTexel(keep1024[0], keep1024[1], keep1024[2]), false);
+  assert.equal(isLandsdNullTexel(mixed1024[0], mixed1024[1], mixed1024[2]), false);
+  assert.equal(isLandsdNullTexel(pad[0], pad[1], pad[2]), true);
+  const gltfJs = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(gltfJs, /nullFillSampleSize/);
+  assert.doesNotMatch(gltfJs, /NULL_FILL_EDGE = 256/);
 });
 
 test('Des Voeux near facades take two mips, and the chase past 80 m stays one mip', () => {
