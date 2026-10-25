@@ -11,8 +11,8 @@ import {
   PLAND_DATASET,
   PLAND_LANDSD_SKIRT,
   PLAND_PAGE_TEX_EDGE,
+  PLAND_PODIUM_ABOVE_BELT,
   PLAND_PODIUM_FACE,
-  PLAND_PODIUM_RIGHT,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   PLAND_STREET_SHELL_APRON,
@@ -32,7 +32,6 @@ import {
   parsePlandMtl,
   parsePlandTiles,
   plandCorridorExtrudeIds,
-  plandCorridorPodiumIds,
   plandKeepTriangle,
   plandLocalToHk80,
   plandLocalToWorld,
@@ -45,6 +44,7 @@ import {
   withPlandCorridorHidden,
   worldToHk80
 } from '../js/hk-pland-frame.js';
+import { digit1InvaderGate } from '../tools/digit1-invader-gate.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
@@ -234,6 +234,7 @@ test('Digit1 cameras are the person chase, and a corridor extrude is hidden only
   assert.equal(merged.selected[0].name, 'landsd');
   assert.ok(merged.hiddenIds.has(3));
   assert.ok(merged.hiddenIds.has(7));
+  assert.equal(merged.podiumFillIds.size, 0);
   assert.equal(merged.podiumFillIds.has(7), false);
   const mtl = parsePlandMtl('newmtl mat_tex_0\nKd 1 1 1\nmap_Kd level_5_0_0_tex_0.jpg\n');
   assert.equal(mtl.mat_tex_0, 'level_5_0_0_tex_0.jpg');
@@ -312,9 +313,10 @@ test('PlanD yields on the street side of Henderson and keeps the mid-street phot
   assert.equal(plandYieldsToLandsd({ x: 190, y: 31.7, z: 91.1 }, boxes), false);
 });
 
-test('PlanD omits inside a near LandsD box at every height and keeps a far box', () => {
+test('PlanD omits a near LandsD podium only in the retail band and keeps the roof', () => {
   assert.equal(HK_STREET_NEAR, 80);
   assert.equal(PLAND_PODIUM_FACE, 0.5);
+  assert.equal(PLAND_PODIUM_ABOVE_BELT, 1);
   assert.ok(Math.abs(HK_RETAIL_BELT - 8.02) < 1e-9, HK_RETAIL_BELT);
   // 11-SW-8D street wall. The Des Voeux eye sits on its north face.
   const b34475 = { minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 };
@@ -327,11 +329,13 @@ test('PlanD omits inside a near LandsD box at every height and keeps a far box',
     [b34475]
   ), true);
   const aboveBelt = { x: 2, y: HK_RETAIL_BELT + 12, z: 40 };
-  assert.equal(plandOmitsPodiumInsideLandsd(aboveBelt, [b34475]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd(aboveBelt, [b34475]), false);
   const roof = { x: 2, y: HK_RETAIL_BELT + 40, z: 40 };
-  assert.equal(plandOmitsPodiumInsideLandsd(roof, [b34475]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd(roof, [b34475]), false);
+  const atCap = { x: 2, y: HK_RETAIL_BELT + PLAND_PODIUM_ABOVE_BELT, z: 40 };
+  assert.equal(plandOmitsPodiumInsideLandsd(atCap, [b34475]), false);
   assert.equal(plandOmitsPodiumInsideLandsd({ ...southPodium, y: HK_RETAIL_BELT + 0.99 }, [b34475]), true);
-  // Half a metre of lot face is the same omit. Farther out, this helper stays quiet.
+  // Half a metre of lot face is the same omit while it is still in the belt.
   assert.equal(plandOmitsPodiumInsideLandsd(
     { x: HK_STREET_EYE.x, y: 4, z: b34475.minZ - 0.4 },
     [b34475]
@@ -343,7 +347,7 @@ test('PlanD omits inside a near LandsD box at every height and keeps a far box',
   assert.equal(plandOmitsPodiumInsideLandsd(
     { x: HK_STREET_EYE.x, y: HK_RETAIL_BELT + 12, z: b34475.minZ - 0.4 },
     [b34475]
-  ), true);
+  ), false);
   assert.equal(plandOmitsPodiumInsideLandsd(
     { x: HK_STREET_EYE.x, y: HK_RETAIL_BELT + 12, z: b34475.minZ - 0.6 },
     [b34475]
@@ -354,10 +358,11 @@ test('PlanD omits inside a near LandsD box at every height and keeps a far box',
   assert.equal(plandOmitsPodiumInsideLandsd(streetSide, [nearLot]), false);
   assert.equal(plandYieldsToLandsd(streetSide, [nearLot]), true);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 30, y: 4, z: 35 }, [nearLot]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 30, y: HK_RETAIL_BELT + 20, z: 35 }, [nearLot]), false);
   const atDisc = { minX: HK_STREET_EYE.x + HK_STREET_NEAR, maxX: 120, minZ: HK_STREET_EYE.z, maxZ: 50 };
   assert.equal(boxClosestDistance(atDisc, HK_STREET_EYE), HK_STREET_NEAR);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 90, y: 4, z: 35 }, [atDisc]), true);
-  assert.equal(plandOmitsPodiumInsideLandsd({ x: 90, y: HK_RETAIL_BELT + 20, z: 35 }, [atDisc]), true);
+  assert.equal(plandOmitsPodiumInsideLandsd({ x: 90, y: HK_RETAIL_BELT + 20, z: 35 }, [atDisc]), false);
   const pastDisc = { minX: HK_STREET_EYE.x + HK_STREET_NEAR + 0.1, maxX: 160, minZ: HK_STREET_EYE.z, maxZ: 50 };
   assert.ok(boxClosestDistance(pastDisc, HK_STREET_EYE) > HK_STREET_NEAR);
   assert.equal(plandOmitsPodiumInsideLandsd({ x: 100, y: 4, z: 35 }, [pastDisc]), false);
@@ -376,8 +381,8 @@ test('PlanD omits inside a near LandsD box at every height and keeps a far box',
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
   const streets = readFileSync(path.join(root, 'js/street-details.js'), 'utf8');
   assert.match(page, /plandOmitsPodiumInsideLandsd/);
-  assert.match(page, /triangles inside near LandsD boxes/);
-  assert.doesNotMatch(page, /podium triangles inside near LandsD boxes/);
+  assert.match(page, /omitted \$\{podium\} podium triangles inside near LandsD boxes/);
+  assert.doesNotMatch(page, /omitted \$\{podium\} triangles inside near LandsD boxes/);
   assert.match(page, /const boxes = donor \? landsdBoxes : \[\]/);
   assert.doesNotMatch(page, /hkShopfrontAlbedo/);
   assert.match(gltf, /omitLandsdNullFill/);
@@ -385,94 +390,50 @@ test('PlanD omits inside a near LandsD box at every height and keeps a far box',
   assert.match(streets, /omitPlandCorridorGlass\(walls/);
 });
 
-test('donor belt fill is the near right plate and stays off the shopfront atlas', () => {
-  assert.equal(PLAND_PODIUM_RIGHT, 8);
-  const eye = HK_STREET_EYE;
-  const sx = -Math.cos(eye.heading);
-  const sz = Math.sin(eye.heading);
-  const fx = Math.sin(eye.heading);
-  const fz = Math.cos(eye.heading);
-  const plate = (id, side, along, extra = {}) => {
-    const x = eye.x + sx * side + fx * along;
-    const z = eye.z + sz * side + fz * along;
-    return {
-      id,
-      height: 40,
-      park: 0,
-      cx: x,
-      cz: z,
-      minX: x - 6,
-      maxX: x + 6,
-      minZ: z - 6,
-      maxZ: z + 6,
-      poly: [
-        { x: x - 6, z: z - 6 },
-        { x: x + 6, z: z - 6 },
-        { x: x + 6, z: z + 6 },
-        { x: x - 6, z: z + 6 }
-      ],
-      ...extra
-    };
-  };
-  const blocks = [
-    plate(1, 24, 20),
-    plate(2, -24, 20),
-    plate(3, 24, 18, { park: 0.9 }),
-    plate(4, 24, 16, { height: null }),
-    plate(5, 24, 200)
-  ];
-  assert.deepEqual(plandCorridorPodiumIds(blocks), [1]);
+test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () => {
   const hsbc = BLOCKS.find((block) => block.name === 'HSBC Main Building');
   const boc = BLOCKS.find((block) => block.name === 'Bank of China Building');
   const cfa = BLOCKS.find((block) => block.name === 'The Court of Final Appeal');
   const henderson = BLOCKS.find((block) => block.name === 'The Henderson');
-  const ids = plandCorridorPodiumIds(BLOCKS);
-  assert.deepEqual(ids.map((id) => BLOCKS.find((block) => block.id === id).name).sort(), [
-    'Bank of China Building',
-    'HSBC Main Building'
-  ]);
-  assert.equal(ids.includes(cfa.id), false);
-  assert.equal(ids.includes(henderson.id), false);
   const chase = plandCorridorExtrudeIds(BLOCKS);
-  for (const id of ids) assert.ok(chase.includes(id));
+  assert.ok(chase.includes(hsbc.id));
+  assert.ok(chase.includes(boc.id));
   assert.ok(chase.includes(henderson.id));
   const donor = withPlandCorridorHidden({ hiddenIds: new Set([3]) }, BLOCKS);
   assert.ok(donor.hiddenIds.has(hsbc.id));
   assert.ok(donor.hiddenIds.has(boc.id));
   assert.ok(donor.hiddenIds.has(henderson.id));
-  assert.ok(donor.podiumFillIds.has(hsbc.id));
-  assert.ok(donor.podiumFillIds.has(boc.id));
+  assert.equal(donor.podiumFillIds.size, 0);
+  assert.equal(donor.podiumFillIds.has(hsbc.id), false);
+  assert.equal(donor.podiumFillIds.has(boc.id), false);
   assert.equal(donor.podiumFillIds.has(cfa.id), false);
   assert.equal(donor.podiumFillIds.has(henderson.id), false);
-  const compare = withPlandCorridorHidden({ hiddenIds: new Set() }, BLOCKS, { podium: false });
+  const compare = withPlandCorridorHidden({ hiddenIds: new Set() }, BLOCKS);
   assert.equal(compare.podiumFillIds.size, 0);
   assert.ok(compare.hiddenIds.has(hsbc.id));
   assert.ok(compare.hiddenIds.has(henderson.id));
   const buildings = readFileSync(path.join(root, 'js/buildings.js'), 'utf8');
-  assert.match(buildings, /podiumFillIds/);
-  assert.match(buildings, /createCorridorPodiumFillMaterial/);
-  assert.match(buildings, /HkCorridorPodiumFill/);
-  assert.match(buildings, /Math\.min\(h, HK_RETAIL_BELT - ISLAND_BOUNDS\.sidewalkHeight\)/);
+  assert.doesNotMatch(buildings, /podiumFillIds|hkCorridorPodiumFill|HkCorridorPodiumFill|createCorridorPodiumFillMaterial|corridor podium/);
   assert.doesNotMatch(buildings, /hkShopfrontAlbedo/);
   const materials = readFileSync(path.join(root, 'js/tsl-materials.js'), 'utf8');
-  const fill = materials.slice(
-    materials.indexOf('function corridorPodiumFillColor'),
-    materials.indexOf('Opaque shopfront for extrude')
-  );
-  assert.match(fill, /hkCorridorPodiumFill/);
-  assert.match(fill, /color\(0x8a847c\)/);
-  assert.doesNotMatch(fill, /shopfrontMap|podiumStreetColor|hkShopfrontAlbedo|podiumShopGlow/);
+  assert.doesNotMatch(materials, /hkCorridorPodiumFill|corridorPodiumFillColor|createCorridorPodiumFillMaterial|0x8a847c/);
   const retail = materials.slice(
     materials.indexOf('function createRetailPodiumMaterial'),
     materials.indexOf('function createPodiumMasonryMaterial')
   );
   assert.match(retail, /podiumStreetColor\(\)/);
   const main = readFileSync(path.join(root, 'js/main.js'), 'utf8');
-  assert.match(main, /podium: plandPlan\.mode === 'donor'/);
-  const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
-  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
-  assert.match(grid, /omitPlandCorridorGlass\(walls/);
-  assert.match(page, /plandOmitsPodiumInsideLandsd/);
+  assert.doesNotMatch(main, /podium:\s*plandPlan\.mode === 'donor'/);
+  assert.match(main, /hidePlandCorridorExtrudes\(gltfPlan\)/);
+  const gate = digit1InvaderGate(root);
+  assert.equal(gate.eye, '?at=-1.4,29.3,1.29');
+  assert.equal(gate.noAshlarInvaderSlabs, true);
+  assert.equal(gate.noZombieSkyHoles, true);
+  assert.ok(gate.nullFillEdge >= 1024);
+  assert.equal(gate.nullFillEdge, 1024);
+  assert.equal(gate.orangeCanyonGone, true);
+  assert.equal(gate.hendersonInFront, true);
+  assert.equal(gate.pass, true);
 });
 
 test('corridor glass and the Digit1 shopfront ribbon both yield to PlanD', () => {

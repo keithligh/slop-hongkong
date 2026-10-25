@@ -2,6 +2,7 @@ import {
   BLOCKS,
   HK_GLTF_STREET_HALF,
   HK_GLTF_STREET_REACH,
+  HK_RETAIL_BELT,
   HK_STREET_EYE,
   HK_STREET_NEAR,
   ISLAND_BOUNDS,
@@ -10,7 +11,7 @@ import {
   hkFootprintHeight
 } from './city-config.js';
 import { GEO } from './geo-source.js';
-import { boxClosestDistance, gltfBoxChase, gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
+import { boxClosestDistance, gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
 import { HK_CURB_W, HK_WALK_W } from './hk-road-deck.js';
 
 // PlanD 3D Photo-realistic Model (規劃署). OBJ tiles are Altizure exports:
@@ -30,18 +31,16 @@ export const PLAND_ATTRIBUTION = '© 香港特別行政區政府規劃署 3D Pho
 export const PLAND_PAGE_TEX_EDGE = 2048;
 // Street-side apron in front of a loaded LandsD box. The 2017 shell can sit
 // proud of The Henderson and paint a pale face over the photograph. Interior
-// triangles of a box inside the 80 m disc are omitted at every height. A box
-// farther than that disc, including The Henderson, can still show the aerial
-// through a chart hole.
+// triangles of a box inside the 80 m disc are omitted only in the retail band.
+// A centre above that band, or a box farther than the disc, including The
+// Henderson, can still show the aerial through a chart hole.
 export const PLAND_LANDSD_SKIRT = 16;
-// Outward pad so a shell proud of the lot face is the same near-box omit as
-// the interior. It stays inside half a metre. The 16 m skirt is a different test.
+// Outward pad so a shell proud of the lot face is the same podium omit as the
+// interior. It stays inside half a metre. The 16 m skirt is a different test.
 export const PLAND_PODIUM_FACE = 0.5;
-// Camera-right of the Des Voeux look, in metres. The eye sits on the
-// carriageway, so the south wall's plate centre is past the kerb. This keeps
-// the HSBC plate and the Bank of China Building, and leaves a ray-clipping
-// test plate, the north colonnade, and The Henderson out of the belt fill.
-export const PLAND_PODIUM_RIGHT = 8;
+// Metres above the retail belt. Podium omit stops here. A higher centre keeps
+// the donor, so a near LandsD hole is not punched into sky.
+export const PLAND_PODIUM_ABOVE_BELT = 1;
 export const PLAND_CAPTURE = 'Hong Kong Island aerial photographs, March 2017; tile files dated February 2019';
 
 // Metres above the sidewalk. Triangles entirely below this are the road carpet.
@@ -604,17 +603,20 @@ export function plandYieldsToLandsd(point, boxes, {
 }
 
 // Donor mount. LandsD null-fill opens atlas holes, and a PlanD centre inside
-// that box was the melted podium and the midband above it at the Des Voeux eye.
-// Drop the centre when the box is within the street disc and the centre is in
-// the footprint or the half-metre face pad, at any height. A box past the disc,
-// including The Henderson, keeps the donor through its chart holes. The belt
-// ashlar fill is a separate mesh and stays capped at the retail belt.
+// that box was the melted right podium at the Des Voeux eye. Drop the centre
+// when the box is within the street disc, the centre is in the footprint (or
+// the half-metre face pad), and it is still in the retail band. A higher
+// centre stays, and so does a box past the disc, including The Henderson.
+// The corridor does not extrude a grey slab into that band.
 export function plandOmitsPodiumInsideLandsd(point, boxes, {
   eye = HK_STREET_EYE,
   near = HK_STREET_NEAR,
-  face = PLAND_PODIUM_FACE
+  belt = HK_RETAIL_BELT,
+  face = PLAND_PODIUM_FACE,
+  aboveBelt = PLAND_PODIUM_ABOVE_BELT
 } = {}) {
   if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < belt + aboveBelt)) return false;
   const pad = Number.isFinite(face) && face > 0 ? face : 0;
   for (const box of boxes || []) {
     if (!box || !Number.isFinite(box.minX) || !Number.isFinite(box.maxX) || !Number.isFinite(box.minZ) || !Number.isFinite(box.maxZ)) {
@@ -757,58 +759,14 @@ export function plandCorridorExtrudeIds(blocks = BLOCKS, eye = HK_STREET_EYE) {
   return ids;
 }
 
-// Side of a point in the Des Voeux look frame. Positive is camera-right,
-// which at this eye is south. Same axis as gltfBoxChase.
-function plandLookSide(x, z, eye = HK_STREET_EYE) {
-  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
-  return gltfBoxChase({ minX: x, maxX: x, minZ: z, maxZ: z }, eye).minSide;
-}
-
-// A vertex inside the carriageway-plus-sidewalk band would wall Des Voeux.
-// The apron stops short of the building line, so a real lot face stays.
-function podiumFootprintClearsStreet(block) {
-  const segments = desVoeuxCarriageSegments();
-  if (!segments.length) return true;
-  const pts = block.poly?.length ? block.poly : [
-    { x: block.cx, z: block.cz },
-    { x: block.minX, z: block.minZ },
-    { x: block.maxX, z: block.minZ },
-    { x: block.minX, z: block.maxZ },
-    { x: block.maxX, z: block.maxZ }
-  ];
-  for (const p of pts) {
-    if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
-    const hit = plandCarriageDistance(p.x, p.z, segments);
-    if (hit && hit.dist <= hit.half + PLAND_STREET_SHELL_APRON) return false;
-  }
-  return true;
-}
-
-// Near right-hand plates only. The corridor hide still drops the tower.
-// These ids are the belt the donor may extrude. Far chase (The Henderson)
-// stays a PlanD donor. The north colonnade is the other side of the look.
-export function plandCorridorPodiumIds(blocks = BLOCKS, eye = HK_STREET_EYE, near = HK_STREET_NEAR) {
-  const ids = [];
-  for (const block of blocks || []) {
-    if (block.park > 0.6 || block.median) continue;
-    if (!blockInHkCore(block)) continue;
-    if (!(hkFootprintHeight(block) > 0)) continue;
-    if (!gltfInStreetChase(block, eye)) continue;
-    if (boxClosestDistance(block, eye) > near) continue;
-    const side = plandLookSide(block.cx, block.cz, eye);
-    if (!(side > PLAND_PODIUM_RIGHT)) continue;
-    if (!podiumFootprintClearsStreet(block)) continue;
-    ids.push(block.id);
-  }
-  return ids;
-}
-
-export function withPlandCorridorHidden(gltfPlan, blocks = BLOCKS, { podium = true } = {}) {
+export function withPlandCorridorHidden(gltfPlan, blocks = BLOCKS) {
   const hiddenIds = new Set(gltfPlan?.hiddenIds || []);
   for (const id of plandCorridorExtrudeIds(blocks)) hiddenIds.add(id);
-  // Towers stay in hiddenIds. podiumFillIds is the belt the donor may emit.
-  // Compare passes podium: false so the aerial A-B is not boxed in.
-  const podiumFillIds = new Set(podium ? plandCorridorPodiumIds(blocks) : []);
+  // Towers stay in hiddenIds. podiumFillIds stays empty: the Digit1 right
+  // plates are not extruded as grey belt slabs, and they are not replaced
+  // with a shopfront ribbon. LandsD charts and the belt-capped PlanD donor
+  // are what that look keeps.
+  const podiumFillIds = new Set();
   if (!gltfPlan) {
     return {
       sheet: '',

@@ -99,9 +99,9 @@ async function initApp() {
   const plandPlan = await preparePlandCorridor(window.location.href);
   let gltfPlan = await prepareHkGltfSheet(window.location.href);
   if (plandPlan) {
-    // Donor keeps the tower hidden and emits the near right belt only.
-    // Compare stays the aerial corridor, with no footprint boxes added.
-    gltfPlan = hidePlandCorridorExtrudes(gltfPlan, { podium: plandPlan.mode === 'donor' });
+    // Corridor extrudes stay hidden in both modes. No belt slab is emitted.
+    // The near PlanD omit is belt-capped when the donor mounts.
+    gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
     gltfPlan.plandMode = plandPlan.mode;
   }
   if (loadingStatus && gltfPlan?.selected?.length && plandPlan?.mode !== 'compare') {
