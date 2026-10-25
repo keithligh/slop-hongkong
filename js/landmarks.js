@@ -142,11 +142,12 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
   const mastH = 52.4;
   const ySkirt = HK_RETAIL_BELT;
   const skirt = createRetailPodiumMaterial();
-  // No individualised BUILDING mesh on this plate (11-SW-9C / 8D / 9D). The prism
-  // stays. Metalness 0.72 with a 0.18 reflection floor is a chrome skin. Dielectric
-  // glass keeps the diagrid.
+  // No individualised BUILDING mesh on this plate (11-SW-9C / 8D / 9D / 10C / 8C).
+  // The prism stays on the LandsD corners. Metalness 0.72 with a 0.18 reflection
+  // floor is a chrome skin. Dielectric glass keeps the diagrid. The tint is light
+  // enough that a ~230 m street eye reads blue glass, not a black plate.
   const face = createCurtainWallMaterial({
-    glassTint: 0x1a4d68,
+    glassTint: 0x7aa3c2,
     frameTint: 0xd5dee6,
     windowWidth: 2.35,
     floorHeight: 3.9,
@@ -162,8 +163,28 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
   face.polygonOffset = true;
   face.polygonOffsetFactor = 1;
   face.polygonOffsetUnits = 1;
-  const braceMat = hkMat(0xd5dee6, { metalness: 0.06, roughness: 0.72 });
+  // One full-height X is a pair of ~1 m lines. At the Digit1 eye that is a dark
+  // slab. A bay about every 52 m, a few metres thick, is the same diagrid at a
+  // size that plate can show. Emissive keeps the member in shade. Metalness stays
+  // near zero, so this is not a chrome skin.
+  const braceMat = hkMat(0xe8eef2, { metalness: 0.04, roughness: 0.46, emissive: 0xc9d3da, emissiveIntensity: 0.7 });
+  braceMat.polygonOffset = true;
+  braceMat.polygonOffsetFactor = -2;
+  braceMat.polygonOffsetUnits = -2;
   const mastMat = hkMat(0x8d939a, { metalness: 0.16, roughness: 0.6 });
+  const tagBoc = () => {
+    const mesh = group.children[group.children.length - 1];
+    if (mesh) mesh.name = 'BankOfChinaTower';
+  };
+  const addBocBeam = (ax, ay, az, bx, by, bz, thickness) => {
+    const before = group.children.length;
+    addBeam(group, braceMat, up, dir, ax, ay, az, bx, by, bz, thickness);
+    if (group.children.length > before) group.children[group.children.length - 1].name = 'BankOfChinaTower';
+  };
+  const edgeTop = (step) => {
+    const y = ground + block.height * fractions[step];
+    return step === 0 ? y + peak : y;
+  };
   for (let step = 0; step < 4; step++) {
     const a = corners[(north + step) % 4];
     const b = corners[(north + step + 1) % 4];
@@ -171,12 +192,23 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
     const yOuter = step === 0 ? yTop + peak : yTop;
     const yCenter = yTop;
     addPrism(group, skirt, a, b, center, ground, ground, ground, ySkirt, ySkirt, ySkirt);
+    tagBoc();
     addPrism(group, face, a, b, center, ySkirt, ySkirt, ySkirt, yOuter, yOuter, yCenter);
+    tagBoc();
     const yBrace0 = ground + 12;
     const yBrace1 = yOuter - 6;
-    if (yBrace1 - yBrace0 > 20) {
-      addBeam(group, braceMat, up, dir, a.x, yBrace0, a.z, b.x, yBrace1, b.z, 1.15);
-      addBeam(group, braceMat, up, dir, b.x, yBrace0, b.z, a.x, yBrace1, a.z, 1.15);
+    const rise = yBrace1 - yBrace0;
+    if (rise > 20) {
+      const bays = Math.max(2, Math.round(rise / 52));
+      const thick = 2.8;
+      for (let bay = 0; bay < bays; bay++) {
+        const yLo = yBrace0 + (rise * bay) / bays;
+        const yHi = yBrace0 + (rise * (bay + 1)) / bays;
+        addBocBeam(a.x, yLo, a.z, b.x, yHi, b.z, thick);
+        addBocBeam(b.x, yLo, b.z, a.x, yHi, a.z, thick);
+        addBocBeam(a.x, yHi, a.z, b.x, yHi, b.z, thick * 0.72);
+      }
+      addBocBeam(a.x, yOuter, a.z, b.x, yOuter, b.z, 2.4);
     }
     if (step === 0) {
       const mx = (a.x + b.x) / 2;
@@ -187,10 +219,16 @@ function addBankOfChina(group, site, colliders, up, dir, ground) {
       for (const sign of [-1, 1]) {
         const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.55, mastH, 6), mastMat);
         mast.position.set(mx + ox * sign, yOuter + mastH / 2, mz + oz * sign);
+        mast.name = 'BankOfChinaTower';
         mast.castShadow = true;
         group.add(mast);
       }
     }
+  }
+  for (let k = 0; k < 4; k++) {
+    const corner = corners[(north + k) % 4];
+    const yPost = Math.max(edgeTop(k), edgeTop((k + 3) % 4));
+    addBocBeam(corner.x, ySkirt, corner.z, corner.x, yPost, corner.z, 2.2);
   }
   colliders.push({
     minX: block.minX,

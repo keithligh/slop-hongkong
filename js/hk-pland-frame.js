@@ -75,6 +75,11 @@ export const PLAND_FLANK_PROUD = 4;
 export const PLAND_FLANK_FACE = 6;
 export const PLAND_FLANK_TOP = 64;
 export const PLAND_FLANK_EYE_BOX = 12;
+// Chartless Bank of China Tower plate. The LandsD footprint is the owner.
+// Proud is a shell just outside that ring, not the bounding-box wedges.
+// The peak is the prism cap already on the tallest edge. The 52.4 m mast stays.
+export const PLAND_BOC_PLATE_PROUD = 2;
+export const PLAND_BOC_PLATE_PEAK = 11.7;
 // Vertices inside this radius of the Des Voeux eye set the HKPD of the pavement.
 // The OBJ also contains heights down to about −188 m. Snapping that minimum
 // to the sidewalk would lift the street into the sky.
@@ -785,6 +790,75 @@ export function plandOmitsDigit1FlankChart(point, boxes, {
     if (onLook || onEye) return true;
   }
   return false;
+}
+
+function isDigit1BocTowerPlate(plate) {
+  return !!(plate
+    && plate.name === 'Bank of China Tower'
+    && plate.height === 303.3
+    && Number.isFinite(plate.minX)
+    && Number.isFinite(plate.maxX)
+    && Number.isFinite(plate.minZ)
+    && Number.isFinite(plate.maxZ)
+    && Array.isArray(plate.poly)
+    && plate.poly.length >= 3);
+}
+
+export function digit1BocTowerPlate(blocks = BLOCKS) {
+  for (const block of blocks || []) {
+    if (isDigit1BocTowerPlate(block)) return block;
+  }
+  return null;
+}
+
+function ringHasPoint(ring, x, z) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i].x;
+    const zi = ring[i].z;
+    const xj = ring[j].x;
+    const zj = ring[j].z;
+    const denom = zj - zi;
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (denom || 1e-12) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function ringClearance(ring, x, z) {
+  let best = Infinity;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const ax = ring[j].x;
+    const az = ring[j].z;
+    const bx = ring[i].x;
+    const bz = ring[i].z;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const len2 = dx * dx + dz * dz || 1e-9;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / len2));
+    const dist = Math.hypot(ax + dx * t - x, az + dz * t - z);
+    if (dist < best) best = dist;
+  }
+  return best;
+}
+
+// Donor mount. The Bank of China Tower plate has no BUILDING mesh, and the
+// flank yield will not punch a chartless lot. This plate is the one exception:
+// the LandsD footprint already owns the shaft. A centroid inside that ring, or
+// within a couple of metres of it, is omitted below the prism peak. The mast
+// above that line stays, so the omit is not a hole into sky. The bounding-box
+// corners sit off the ring and are not this plate. No other landmark matches.
+export function plandOmitsDigit1BocPlate(point, plate, {
+  proud = PLAND_BOC_PLATE_PROUD,
+  peak = PLAND_BOC_PLATE_PEAK,
+  sidewalk = ISLAND_BOUNDS.sidewalkHeight
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!isDigit1BocTowerPlate(plate)) return false;
+  const cap = sidewalk + plate.height + (Number.isFinite(peak) ? peak : 0);
+  if (!(point.y < cap)) return false;
+  const pad = Number.isFinite(proud) && proud > 0 ? proud : 0;
+  if (ringHasPoint(plate.poly, point.x, point.z)) return true;
+  return ringClearance(plate.poly, point.x, point.z) <= pad;
 }
 
 export function resolvePlandRequest(href) {

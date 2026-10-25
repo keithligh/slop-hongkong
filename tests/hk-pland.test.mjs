@@ -13,9 +13,13 @@ import {
   PLAND_PAGE_TEX_EDGE,
   PLAND_PODIUM_ABOVE_BELT,
   PLAND_PODIUM_FACE,
+  PLAND_BOC_PLATE_PEAK,
+  PLAND_BOC_PLATE_PROUD,
   PLAND_FLANK_FACE,
   PLAND_FLANK_PROUD,
   PLAND_FLANK_TOP,
+  digit1BocTowerPlate,
+  plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
@@ -406,6 +410,61 @@ test('PlanD yields a Digit1 flank chart and keeps the near-box interior', () => 
   assert.equal(plandOmitsDigit1FlankChart(proud, []), false);
 });
 
+test('PlanD yields the chartless Bank of China Tower plate and keeps the mast', () => {
+  assert.equal(PLAND_BOC_PLATE_PROUD, 2);
+  assert.equal(PLAND_BOC_PLATE_PEAK, 11.7);
+  const tower = digit1BocTowerPlate();
+  assert.equal(tower.name, 'Bank of China Tower');
+  assert.equal(tower.height, 303.3);
+  const inside = { x: 164.3, y: 25, z: 146.7 };
+  assert.equal(plandOmitsDigit1BocPlate(inside, tower), true);
+  assert.equal(plandOmitsDigit1BocPlate({ x: tower.cx, y: 25, z: tower.cz }, tower), true);
+  const roof = ISLAND_BOUNDS.sidewalkHeight + tower.height;
+  assert.equal(plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + 4, z: tower.cz }, tower), true);
+  assert.equal(plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + PLAND_BOC_PLATE_PEAK, z: tower.cz }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + 40, z: tower.cz }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: 149.2, y: 25, z: 144.4 }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: 278.49, y: 15.44, z: 110.37 }, tower), false);
+  assert.equal(plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: 230, y: 40, z: 80 }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: 80.35, y: 10.37, z: 53.23 }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate({ x: 2, y: HK_RETAIL_BELT + 12, z: 40 }, tower), false);
+  assert.equal(plandOmitsDigit1BocPlate(inside, { ...tower, name: 'The Henderson' }), false);
+  assert.equal(plandOmitsDigit1BocPlate(inside, null), false);
+  assert.equal(plandOmitsDigit1BocPlate(null, tower), false);
+  const poly = tower.poly;
+  let bestLen = 0;
+  let edge = [poly[0], poly[1]];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const len = Math.hypot(poly[i].x - poly[j].x, poly[i].z - poly[j].z);
+    if (len > bestLen) {
+      bestLen = len;
+      edge = [poly[j], poly[i]];
+    }
+  }
+  const mx = (edge[0].x + edge[1].x) / 2;
+  const mz = (edge[0].z + edge[1].z) / 2;
+  let nx = edge[1].z - edge[0].z;
+  let nz = -(edge[1].x - edge[0].x);
+  const nlen = Math.hypot(nx, nz) || 1;
+  nx /= nlen;
+  nz /= nlen;
+  if ((tower.cx - mx) * nx + (tower.cz - mz) * nz > 0) {
+    nx = -nx;
+    nz = -nz;
+  }
+  assert.equal(plandOmitsDigit1BocPlate({ x: mx + nx * 1.2, y: 25, z: mz + nz * 1.2 }, tower), true);
+  assert.equal(plandOmitsDigit1BocPlate({ x: mx + nx * 8, y: 25, z: mz + nz * 8 }, tower), false);
+  assert.equal(plandOmitsDigit1FlankChart({ x: tower.cx, y: 25, z: tower.cz }, [{
+    minX: 44.3, maxX: 109.8, minZ: 115.4, maxZ: 180.9, minH: 5, maxH: 281.5
+  }]), false);
+  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
+  assert.match(page, /omitted \$\{boc\} triangles on the Digit1 BoC Tower LandsD plate/);
+  assert.match(page, /boxes\?\.length \? digit1BocTowerPlate\(\) : null/);
+  const landmarks = readFileSync(path.join(root, 'js/landmarks.js'), 'utf8');
+  assert.match(landmarks, /const peak = 11\.7/);
+});
+
 test('PlanD yields on the street side of Henderson and keeps the mid-street photo point', () => {
   const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
   const west = { minX: 29.4, maxX: 86.2, minZ: -43, maxZ: 35.4, minH: 4.4, maxH: 44.6 };
@@ -546,6 +605,7 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1FlankMeltGone, true);
   assert.equal(gate.digit1CanyonDensity, true);
   assert.equal(gate.digit1FarFlankFidelity, true);
+  assert.equal(gate.digit1BocPlateOwned, true);
   assert.equal(gate.pass, true);
 });
 

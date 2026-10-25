@@ -7,7 +7,9 @@ import {
   formatPlandLog,
   planPlandManifest,
   plandLocalToWorld,
+  digit1BocTowerPlate,
   plandOmitsCarriageShell,
+  plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
   plandOmitsPodiumInsideLandsd,
@@ -122,13 +124,16 @@ function finishBaked(geo) {
 // ray, which is where the mid-road melt sits after the apron has already ended.
 // The flank yield is donor only. It drops a look-axis shell proud of a chase
 // chart, and the canyon of a chart past 80 m, short of The Henderson.
+// The BoC Tower yield is donor only too. It drops the chartless LandsD plate
+// the shaft prism already owns. Compare passes no boxes, so that plate stays.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
-  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0 };
+  const bocPlate = boxes?.length ? digit1BocTowerPlate() : null;
+  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0, flank: 0, boc: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
@@ -138,6 +143,7 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   let podium = 0;
   let look = 0;
   let flank = 0;
+  let boc = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -176,6 +182,10 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
       flank++;
       continue;
     }
+    if (bocPlate && plandOmitsDigit1BocPlate(mid, bocPlate)) {
+      boc++;
+      continue;
+    }
     const p = written * 9;
     keptPos[p] = a[0];
     keptPos[p + 1] = a[1];
@@ -198,11 +208,11 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, landsd, shell, podium, look, flank };
+  if (!written) return { geo: null, landsd, shell, podium, look, flank, boc };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), landsd, shell, podium, look, flank, kept: written };
+  return { geo: finishBaked(next), landsd, shell, podium, look, flank, boc, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -247,6 +257,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let podium = 0;
   let look = 0;
   let flank = 0;
+  let boc = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
   const segments = desVoeuxCarriageSegments();
@@ -264,6 +275,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         podium += trimmed.podium;
         look += trimmed.look;
         flank += trimmed.flank;
+        boc += trimmed.boc || 0;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -293,5 +305,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (podium) console.info(`[pland] omitted ${podium} podium triangles inside near LandsD boxes`);
   if (look) console.info(`[pland] omitted ${look} triangles on the Digit1 mid-road look`);
   if (flank) console.info(`[pland] omitted ${flank} triangles proud of Digit1 LandsD flank charts`);
-  return { loaded, failed, triangles, yielded, shell, podium, look, flank, group };
+  if (boc) console.info(`[pland] omitted ${boc} triangles on the Digit1 BoC Tower LandsD plate`);
+  return { loaded, failed, triangles, yielded, shell, podium, look, flank, boc, group };
 }

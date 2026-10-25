@@ -10,17 +10,20 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, ROADS } from '../js/city-config.js';
+import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, ISLAND_BOUNDS, ROADS } from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
 import { NULL_FILL_EDGE, boxClosestDistance, gltfAlbedoSampler } from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
 import {
+  PLAND_BOC_PLATE_PEAK,
   PLAND_PODIUM_ABOVE_BELT,
   PLAND_STREET_SHELL_APRON,
   desVoeuxCarriageSegments,
+  digit1BocTowerPlate,
   plandCarriageDistance,
   plandOmitsCarriageShell,
+  plandOmitsDigit1BocPlate,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
   plandOmitsPodiumInsideLandsd,
@@ -222,9 +225,9 @@ function lookPointBox(dist) {
 
 // Mid-far canyon charts on the Digit1 look. The photograph past 80 m is the
 // same two-level anisotropic sample as the near disc, not a full mip chain
-// and not the one-tap smear. The chartless Bank of China Tower plate is not
-// punched: there is no BUILDING mesh to put there. A low centre sample past
-// Henderson (tile_22_26) is not this bar.
+// and not the one-tap smear. The chartless Bank of China Tower plate is owned
+// by the LandsD shaft yield, not by widening this flank-chart punch. A low
+// centre sample past Henderson (tile_22_26) is not this bar.
 export function digit1FarFlankFidelity() {
   if (!chaseTwoLevel(lookPointBox(96))) return false;
   if (!chaseTwoLevel(lookPointBox(220))) return false;
@@ -242,8 +245,50 @@ export function digit1FarFlankFidelity() {
   const tower = BLOCKS.find((block) => block.name === 'Bank of China Tower' && block.height === 303.3);
   if (!tower) return false;
   const charts = [BOC_CHART, CKC_CHART, HENDERSON, SOUTH_WALL];
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: 25, z: tower.cz }, tower) !== true) return false;
   if (plandOmitsDigit1FlankChart({ x: tower.cx, y: 25, z: tower.cz }, charts) !== false) return false;
   if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  return true;
+}
+
+// Chartless BoC Tower plate. The right_mid second hit at tip 17419de sits
+// inside the LandsD ring. That centroid yields. The mast above the prism peak
+// stays. The flank-chart punch does not grow to cover this plate, and a
+// neighbour in the bounding-box wedge is not the plate. The prism on those
+// corners is the Digit1-eye face: multi-bay diagrid, dielectric glass.
+export function digit1BocPlateOwned(sources) {
+  const tower = digit1BocTowerPlate();
+  if (!tower) return false;
+  const inside = { x: 164.3, y: 25, z: 146.7 };
+  if (plandOmitsDigit1BocPlate(inside, tower) !== true) return false;
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: 25, z: tower.cz }, tower) !== true) return false;
+  const roof = ISLAND_BOUNDS.sidewalkHeight + tower.height;
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + 4, z: tower.cz }, tower) !== true) return false;
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + PLAND_BOC_PLATE_PEAK, z: tower.cz }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: tower.cx, y: roof + 40, z: tower.cz }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: 149.2, y: 25, z: 144.4 }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: 278.49, y: 15.44, z: 110.37 }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: 230, y: 40, z: 80 }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: 80.35, y: 10.37, z: 53.23 }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate({ x: 2, y: HK_RETAIL_BELT + 12, z: 40 }, tower) !== false) return false;
+  if (plandOmitsDigit1BocPlate(inside, { ...tower, name: 'The Henderson' }) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  const charts = [BOC_CHART, CKC_CHART, HENDERSON, SOUTH_WALL];
+  if (plandOmitsDigit1FlankChart({ x: tower.cx, y: 25, z: tower.cz }, charts) !== false) return false;
+  if (plandOmitsDigit1FlankChart({ x: 58.07, y: 10.59, z: 71.81 }, [BOC_CHART]) !== true) return false;
+  const page = sources?.pland || '';
+  if (!/omitted \$\{boc\} triangles on the Digit1 BoC Tower LandsD plate/.test(page)) return false;
+  if (!/boxes\?\.length \? digit1BocTowerPlate\(\) : null/.test(page)) return false;
+  const landmarks = sources?.landmarks || '';
+  const bocSrc = landmarks.slice(landmarks.indexOf('function addBankOfChina'), landmarks.indexOf('function addJardine'));
+  if (!/Math\.max\(2, Math\.round\(rise \/ 52\)\)/.test(bocSrc)) return false;
+  if (!/glassMetalness: 0/.test(bocSrc)) return false;
+  if (!/glassRoughness: 0\.48/.test(bocSrc)) return false;
+  if (!/reflectionFloor: 0\.04/.test(bocSrc)) return false;
+  if (!/createRetailPodiumMaterial\(\)/.test(bocSrc)) return false;
+  if (/reflectivity: 0\.96/.test(bocSrc)) return false;
+  if (/mapillary/i.test(bocSrc)) return false;
+  if (/hkShopfrontAlbedo/.test(bocSrc)) return false;
   return true;
 }
 
@@ -274,7 +319,8 @@ export function readDigit1Sources(root) {
     frame: read('js/hk-pland-frame.js'),
     pland: read('js/hk-pland.js'),
     grid: read('js/city-grid.js'),
-    gltf: read('js/hk-gltf-frame.js')
+    gltf: read('js/hk-gltf-frame.js'),
+    landmarks: read('js/landmarks.js')
   };
 }
 
@@ -294,7 +340,8 @@ export function digit1InvaderGate(root) {
     digit1SidewalkAuthentic: digit1SidewalkAuthentic(sources),
     digit1FlankMeltGone: digit1FlankMeltGone(),
     digit1CanyonDensity: digit1CanyonDensity(sources, plan),
-    digit1FarFlankFidelity: digit1FarFlankFidelity()
+    digit1FarFlankFidelity: digit1FarFlankFidelity(),
+    digit1BocPlateOwned: digit1BocPlateOwned(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -308,6 +355,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1FlankMeltGone === true
     && bars.digit1CanyonDensity === true
     && bars.digit1FarFlankFidelity === true
+    && bars.digit1BocPlateOwned === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }
