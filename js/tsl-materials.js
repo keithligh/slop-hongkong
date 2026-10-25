@@ -1321,18 +1321,22 @@ function createLaneStripeMaterial(hex) {
  * Concrete sidewalk flags. Ribbon meshes carry hkSpan (width, length) so the
  * joints run across and along the pavement. A diagonal street then reads as
  * flags, not a world-axis diamond. Areas with no span keep world metres.
+ * A 6 mm grout line is below a pixel at the Digit1 kerb, and gridLine then
+ * fades it to the mean, so the walk reads as one slab. The joint is wide
+ * enough to stay a line inside that eye. F90 = 1 on a flat walk mirrors the
+ * sky and turns the same concrete teal; the specular cap is the lawn fix.
  */
 function createSidewalkMaterial({ ribbon = true } = {}) {
   const mat = new THREE.MeshStandardNodeMaterial({
     metalness: 0.0,
-    roughness: 0.88
+    roughness: 0.92
   });
 
-  const cConcreteA = color(0x8e8d85);
-  const cConcreteB = color(0x73726b);
+  const cConcreteA = color(0x9a9488);
+  const cConcreteB = color(0x6f6a62);
   const acrossPeriod = 0.45;
   const alongPeriod = 0.9;
-  const jointHalf = 0.006;
+  const jointHalf = 0.022;
 
   // Ribbons are instanced and carry hkSpan. Areas are ordinary meshes and stay
   // on world metres, so the two draws do not share one attribute step.
@@ -1369,21 +1373,28 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
     ).mul(detail);
 
     const baseConcrete = mix(cConcreteB, cConcreteA, tone)
-      .mul(panelHash.sub(0.5).mul(0.12).add(1.0))
+      .mul(panelHash.sub(0.5).mul(0.16).add(1.0))
       .add(grit)
-      .mul(mix(float(1.0), float(0.72), max(swWet.x, swPuddle)))
-      .mul(mix(float(1.0), float(0.8), swWet.z));
+      .mul(mix(float(1.0), float(0.78), max(swWet.x, swPuddle)))
+      .mul(mix(float(1.0), float(0.88), swWet.z));
 
-    return baseConcrete.mul(float(1.0).sub(joints.mul(0.22)));
+    return baseConcrete.mul(float(1.0).sub(joints.mul(0.46)));
   })();
 
   mat.roughnessNode = Fn(() => {
     const panelHash = hash2D(floor(vec2(swX.div(acrossPeriod), swZ.div(alongPeriod))));
-    const wetRough = mix(float(0.90).sub(panelHash.mul(0.06)), float(0.55), max(swWet.z, swWet.x.mul(0.7)));
-    return mix(wetRough, float(0.2), swPuddle);
+    const wetRough = mix(float(0.92).sub(panelHash.mul(0.04)), float(0.78), max(swWet.z, swWet.x.mul(0.35)));
+    return mix(wetRough, float(0.38), swPuddle);
   })();
 
-  mat.metalnessNode = clamp(swFresnel.mul(1.6), 0.0, 0.85).mul(max(swPuddle, swWet.z.mul(0.3)));
+  // Standing water may mirror. The wet film must not, or the whole flag goes teal.
+  mat.metalnessNode = clamp(swFresnel.mul(0.4), 0.0, 0.4).mul(swPuddle);
+
+  mat.setupSpecular = function () {
+    specularColor.assign(vec3(0.035));
+    specularColorBlended.assign(vec3(0.035));
+    specularF90.assign(0.24);
+  };
 
   mat.normalNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
@@ -1394,7 +1405,7 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
       gridLine(swZ, alongPeriod, jointHalf)
     );
     const grain = noise2D(vec2(swX.mul(4.5), swZ.mul(4.5))).sub(0.5).mul(0.003);
-    const height = grain.sub(joints.mul(0.008)).mul(detail).mul(float(1.0).sub(swPuddle));
+    const height = grain.sub(joints.mul(0.012)).mul(detail).mul(float(1.0).sub(swPuddle));
     return bumpNormal(height);
   })();
 

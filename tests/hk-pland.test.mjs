@@ -503,6 +503,8 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.hendersonInFront, true);
   assert.equal(gate.ndcCentreNotPland, true);
   assert.equal(gate.midRoadSlimeGone, true);
+  assert.equal(gate.digit1GroundLifeVisible, true);
+  assert.equal(gate.digit1SidewalkAuthentic, true);
   assert.equal(gate.pass, true);
 });
 

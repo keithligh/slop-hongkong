@@ -1,6 +1,8 @@
 // Digit1 bars. Keith's eye at ?at=-1.4,29.3,1.29 is the live gate.
 // Cut #26 fails a remount of the grey corridor slabs and a full-height punch
 // of near PlanD. Cut #27 fails a centre ray that still first-hits PlanD.
+// Cut #28 fails when the forward 皇后像廣場 shelter is outside that chase, or
+// when the sidewalk shader is still a sky-mirror slab.
 // These checks do not claim a Sleeping Dogs street.
 //
 //   node tools/digit1-invader-gate.mjs
@@ -8,8 +10,11 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE } from '../js/city-config.js';
+import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, ROADS } from '../js/city-config.js';
+import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
 import { NULL_FILL_EDGE } from '../js/hk-gltf-frame.js';
+import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
+import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
 import {
   PLAND_PODIUM_ABOVE_BELT,
   PLAND_STREET_SHELL_APRON,
@@ -99,6 +104,59 @@ export function midRoadSlimeGone(sources) {
     && /omitted \$\{look\} triangles on the Digit1 mid-road look/.test(page);
 }
 
+function queenShelterInFront(plan = planHkStreetGround(HK_PEDESTRIAN, ROADS)) {
+  const eye = HK_STREET_EYE;
+  const fx = Math.sin(eye.heading);
+  const fz = Math.cos(eye.heading);
+  const rx = -fz;
+  const rz = fx;
+  let best = null;
+  for (const stop of plan.stops) {
+    if (stop.name !== '皇后像廣場' || !stop.shelter || stop.inRoad) continue;
+    const dx = stop.x - eye.x;
+    const dz = stop.z - eye.z;
+    const along = dx * fx + dz * fz;
+    const lat = dx * rx + dz * rz;
+    if (!(along > 2 && along < 40 && Math.abs(lat) < 20)) continue;
+    if (!best || along < best.along) best = { ...stop, along, lat };
+  }
+  return best;
+}
+
+// The forward 皇后像廣場 shelter is on the north kerb walk and inside the
+// Digit1 chase, not only in the build count.
+export function digit1GroundLifeVisible(plan) {
+  const stop = queenShelterInFront(plan);
+  if (!stop) return false;
+  if (!(stop.lat < -3.2 && stop.lat > -6.2)) return false;
+  const pose = digit1ChasePose(HK_STREET_EYE);
+  const roofPose = hkShelterRoofPose(stop);
+  const sign = projectChaseNdc(pose, { x: stop.x, y: HK_BUS_SHELTER.signY, z: stop.z });
+  const roof = projectChaseNdc(pose, { x: roofPose.x, y: HK_BUS_SHELTER.roofY, z: roofPose.z });
+  const inFrame = (hit) => hit.depth > 4 && hit.depth < 40
+    && Math.abs(hit.ndcX) < 0.82
+    && Math.abs(hit.ndcY) < 0.9;
+  return inFrame(sign) && inFrame(roof);
+}
+
+export function digit1SidewalkAuthentic(sources) {
+  const mat = sources?.materials || '';
+  const start = mat.indexOf('function createSidewalkMaterial');
+  const end = mat.indexOf('function createCurbMaterial');
+  const body = start >= 0 && end > start ? mat.slice(start, end) : '';
+  if (!/const jointHalf = 0\.022;/.test(body)) return false;
+  if (!/specularF90\.assign\(0\.24\)/.test(body)) return false;
+  if (!/mat\.setupSpecular = function/.test(body)) return false;
+  if (!/metalnessNode = clamp\(swFresnel\.mul\(0\.4\), 0\.0, 0\.4\)\.mul\(swPuddle\)/.test(body)) return false;
+  if (/swWet\.z\.mul\(0\.3\)/.test(body)) return false;
+  const grid = sources?.grid || '';
+  if (!/createSidewalkMaterial\(\)/.test(grid)) return false;
+  if (!/HkSidewalks/.test(grid) || !/HkOsmPavement/.test(grid)) return false;
+  if (/mapillary/i.test(body) || /mapillary/i.test(grid)) return false;
+  if (/hkCoastLand/.test(body)) return false;
+  return true;
+}
+
 export function orangeCanyonGone(sources) {
   return /omitPlandCorridorGlass\(walls/.test(sources.grid || '')
     && !/hkShopfrontAlbedo/.test(sources.pland || '');
@@ -128,7 +186,9 @@ export function digit1InvaderGate(root) {
     orangeCanyonGone: orangeCanyonGone(sources),
     hendersonInFront: plandYieldsToLandsd({ x: 212.8, y: 31.7, z: 91.1 }, [HENDERSON]),
     ndcCentreNotPland: ndcCentreNotPland(),
-    midRoadSlimeGone: midRoadSlimeGone(sources)
+    midRoadSlimeGone: midRoadSlimeGone(sources),
+    digit1GroundLifeVisible: digit1GroundLifeVisible(),
+    digit1SidewalkAuthentic: digit1SidewalkAuthentic(sources)
   };
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -137,6 +197,8 @@ export function digit1InvaderGate(root) {
     && bars.hendersonInFront === true
     && bars.ndcCentreNotPland === true
     && bars.midRoadSlimeGone === true
+    && bars.digit1GroundLifeVisible === true
+    && bars.digit1SidewalkAuthentic === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   return bars;
 }

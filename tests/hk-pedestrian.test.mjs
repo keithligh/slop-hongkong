@@ -3,12 +3,16 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ROADS } from '../js/city-config.js';
+import { HK_STREET_EYE, ROADS } from '../js/city-config.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
+import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
 import {
   HK_BUS_SHELTER,
+  hkShelterRoofPose,
   HK_FOOTWAY_WIDTH,
   HK_SIDEWALK_WIDTH,
+  HK_STOP_POLE_INSET,
+  HK_STOP_SEAT_MAX,
   collectHkPedestrian,
   crossingPaint,
   pavementWidth,
@@ -124,6 +128,37 @@ test('a walk that crosses the kerb keeps its outer edge and stops at the stone',
   assert.ok(walk.w < HK_SIDEWALK_WIDTH);
 });
 
+test('a stop in the lane or the plaza is seated onto its own kerb, and a far node stays', () => {
+  const roads = [{ w: 10, lanes: 3, pts: [{ x: 0, z: 0 }, { x: 0, z: 80 }] }];
+  const plan = planHkStreetGround({
+    walks: [],
+    areas: [],
+    crossings: [],
+    stops: [
+      { x: 1.2, z: 20, name: 'lane', shelter: true },
+      { x: 6.4, z: 30, name: 'walk', shelter: true },
+      { x: 14, z: 40, name: 'plaza', shelter: true },
+      { x: 18, z: 50, name: 'far', shelter: true },
+      { x: -12, z: 60, name: 'south', shelter: true }
+    ],
+    furniture: []
+  }, roads);
+  const byName = Object.fromEntries(plan.stops.map((stop) => [stop.name, stop]));
+  const kerb = 5 + 0.18;
+  const inset = kerb + HK_STOP_POLE_INSET;
+  assert.ok(Math.abs(byName.lane.x - inset) < 1e-6);
+  assert.equal(byName.lane.inRoad, false);
+  assert.ok(Math.abs(byName.walk.x - 6.4) < 1e-6, 'a node already on the walk stays');
+  assert.equal(byName.walk.inRoad, false);
+  assert.ok(Math.abs(byName.plaza.x - inset) < 1e-6);
+  assert.ok(byName.plaza.x > 0);
+  assert.ok(18 - kerb > HK_STOP_SEAT_MAX);
+  assert.ok(Math.abs(byName.far.x - 18) < 1e-6);
+  assert.ok(Math.abs(byName.south.x + inset) < 1e-6);
+  assert.ok(byName.south.x < 0);
+  for (const stop of plan.stops) assert.equal(stop.shelter, true);
+});
+
 test('an empty extract adds no pavement and no bus stop', () => {
   const plan = planHkStreetGround({ walks: [], areas: [], crossings: [], stops: [], furniture: [] }, ROADS);
   assert.equal(plan.walks.length, 0);
@@ -133,7 +168,7 @@ test('an empty extract adds no pavement and no bus stop', () => {
 
 test('Des Voeux eye height has mapped pavement, a zebra, and the Statue Square stop', () => {
   const plan = planHkStreetGround(HK_PEDESTRIAN, ROADS);
-  const eye = { x: -1.4, z: 29.3 };
+  const eye = HK_STREET_EYE;
   const along = { x: 22.6, z: 36.2 };
   const south = { x: -1.4, z: 35.3 };
   const near = (p, cam, r) => Math.hypot(p.x - cam.x, p.z - cam.z) <= r;
@@ -150,10 +185,32 @@ test('Des Voeux eye height has mapped pavement, a zebra, and the Statue Square s
   assert.ok(HK_BUS_SHELTER.signH >= 0.6);
   assert.ok(HK_BUS_SHELTER.roofLen >= 4.5);
   assert.ok(HK_BUS_SHELTER.signY > 1.6 && HK_BUS_SHELTER.signY < HK_BUS_SHELTER.roofY);
+  const fx = Math.sin(eye.heading);
+  const fz = Math.cos(eye.heading);
+  const rx = -fz;
+  const rz = fx;
+  const forward = plan.stops
+    .filter((item) => item.name === '皇后像廣場' && item.shelter && !item.inRoad)
+    .map((item) => {
+      const dx = item.x - eye.x;
+      const dz = item.z - eye.z;
+      return { ...item, along: dx * fx + dz * fz, lat: dx * rx + dz * rz };
+    })
+    .filter((item) => item.along > 2 && item.along < 40 && Math.abs(item.lat) < 20)
+    .sort((a, b) => a.along - b.along)[0];
+  assert.ok(forward);
+  assert.ok(forward.lat < -3.2 && forward.lat > -6.2, 'the shelter stands on the north kerb walk');
+  const pose = digit1ChasePose(eye);
+  const roofPose = hkShelterRoofPose(forward);
+  const sign = projectChaseNdc(pose, { x: forward.x, y: HK_BUS_SHELTER.signY, z: forward.z });
+  const roof = projectChaseNdc(pose, { x: roofPose.x, y: HK_BUS_SHELTER.roofY, z: roofPose.z });
+  assert.ok(sign.depth > 4 && Math.abs(sign.ndcX) < 0.82 && Math.abs(sign.ndcY) < 0.9);
+  assert.ok(roof.depth > 4 && Math.abs(roof.ndcX) < 0.82 && Math.abs(roof.ndcY) < 0.9);
   assert.ok(HK_PEDESTRIAN.attribution.includes('OpenStreetMap'));
   assert.deepEqual(HK_PEDESTRIAN.bbox, [22.276, 114.150, 22.288, 114.170]);
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
   assert.match(grid, /HK_BUS_SHELTER/);
+  assert.match(grid, /hkShelterRoofPose/);
   assert.match(grid, /DoubleSide/);
   const html = readFileSync(path.join(root, 'index.html'), 'utf8');
   assert.match(grid, /planHkStreetGround\(HK_PEDESTRIAN, ROADS\)/);

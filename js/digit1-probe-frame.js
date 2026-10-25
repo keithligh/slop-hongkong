@@ -106,6 +106,44 @@ export function digit1ChasePose(at, {
   };
 }
 
+// Chase frustum in the same frame as digit1ChasePose. aspect is width/height.
+// ndc x/y are -1..1 when the point is inside that view and in front.
+export function projectChaseNdc(pose, point, aspect = 16 / 9) {
+  const cam = pose.cam;
+  const look = pose.look;
+  const zx = cam.x - look.x;
+  const zy = cam.y - look.y;
+  const zz = cam.z - look.z;
+  const zl = Math.hypot(zx, zy, zz) || 1;
+  const zax = zx / zl;
+  const zay = zy / zl;
+  const zaz = zz / zl;
+  let xx = zaz;
+  let xy = 0;
+  let xz = -zax;
+  const xl = Math.hypot(xx, xz) || 1;
+  xx /= xl;
+  xz /= xl;
+  const yx = zay * xz - zaz * xy;
+  const yy = zaz * xx - zax * xz;
+  const yz = zax * xy - zay * xx;
+  const dx = point.x - cam.x;
+  const dy = point.y - cam.y;
+  const dz = point.z - cam.z;
+  const camX = dx * xx + dy * xy + dz * xz;
+  const camY = dx * yx + dy * yy + dz * yz;
+  const camZ = dx * zax + dy * zay + dz * zaz;
+  const depth = -camZ;
+  const tanV = Math.tan(((pose.fov || 56) * Math.PI) / 360);
+  const tanH = tanV * aspect;
+  if (!(depth > 1e-4)) return { depth, ndcX: Infinity, ndcY: Infinity };
+  return {
+    depth,
+    ndcX: (camX / depth) / tanH,
+    ndcY: (camY / depth) / tanV
+  };
+}
+
 export function ndcToReadPixel(ndcX, ndcY, width, height, origin) {
   const x = clampInt(Math.round(((ndcX + 1) / 2) * (width - 1)), 0, width - 1);
   const v = origin === 'bottom' ? (ndcY + 1) / 2 : (1 - ndcY) / 2;

@@ -3,15 +3,21 @@
 // a footway or sidewalk way, a crossing node, a bus_stop node, a bench, a street lamp.
 // Nothing is added where the extract has no feature.
 
-import { carriagewayWidth, HK_KERB_STONE, segmentFrame } from './hk-road-deck.js';
+import { carriagewayWidth, HK_CURB_W, HK_KERB_STONE, HK_WALK_W, segmentFrame } from './hk-road-deck.js';
 
 export const HK_SIDEWALK_WIDTH = 3.4;
 export const HK_FOOTWAY_WIDTH = 2.05;
 export const HK_STOP_DEDUPE_M = 8;
-// 皇后像廣場 sits 14–21 m from the Des Voeux eye, on the north pavement.
-// The roof runs along the kerb. The plate faces the carriageway and crosses
-// the eye line (person eye ≈ 1.9 m), so the Chinese name is readable there.
-// Nothing here is drawn unless the node is highway=bus_stop and shelter=yes.
+// Metres from the kerb stone to the pole. The roof then sets back off the
+// carriageway and still lands on the deck walk.
+export const HK_STOP_POLE_INSET = 0.55;
+// A node this far behind the stone is a different place, not this kerb.
+export const HK_STOP_SEAT_MAX = 12;
+// 皇后像廣場 is a real shelter on the north side of Des Voeux. The OSM node
+// sits ~13 m off the centreline, in the plaza behind the kerb walk, so the
+// Digit1 chase (heading 1.29) clips it at the left edge. The pole is seated
+// onto that walk, on the node's own side. Nothing is drawn unless the node
+// is highway=bus_stop, and the roof still requires shelter=yes and not inRoad.
 export const HK_BUS_SHELTER = Object.freeze({
   roofW: 1.85,
   roofLen: 5.4,
@@ -26,6 +32,18 @@ export const HK_BUS_SHELTER = Object.freeze({
   poleY: 0.22,
   poleH: 2.42
 });
+
+export function hkShelterRoofPose(stop, shelter = HK_BUS_SHELTER) {
+  const away = stop.yaw + Math.PI;
+  return {
+    x: stop.x + Math.sin(away) * shelter.roofSetback,
+    z: stop.z + Math.cos(away) * shelter.roofSetback,
+    yaw: stop.roadYaw,
+    w: shelter.roofW,
+    len: shelter.roofLen
+  };
+}
+
 const ROAD_CELL = 28;
 
 function round1(value) {
@@ -299,6 +317,30 @@ function faceYaw(stop, hit) {
   return Math.atan2(nx, nz);
 }
 
+function deckWalkOuter(half) {
+  return half + HK_KERB_STONE + HK_WALK_W + (HK_CURB_W - HK_KERB_STONE);
+}
+
+// Keep a node that already stands on the kerb walk. Pull one that is in the
+// lane, or set back into the plaza within HK_STOP_SEAT_MAX, out to the flags.
+// The side is the node's side, so a north stop stays north.
+function seatStop(stop, hit) {
+  if (!hit) return { x: stop.x, z: stop.z, yaw: 0, roadYaw: 0 };
+  const kerb = hit.seg.half + HK_KERB_STONE;
+  const outer = deckWalkOuter(hit.seg.half);
+  const side = (stop.x - hit.x) * hit.seg.rx + (stop.z - hit.z) * hit.seg.rz;
+  const sign = side >= 0 ? 1 : -1;
+  const setback = hit.d - kerb;
+  const onWalk = setback >= 0.2 && setback <= (outer - kerb) + 0.35;
+  if (!onWalk && setback <= HK_STOP_SEAT_MAX) {
+    const d = kerb + HK_STOP_POLE_INSET;
+    const x = hit.x + hit.seg.rx * sign * d;
+    const z = hit.z + hit.seg.rz * sign * d;
+    return { x, z, yaw: faceYaw({ x, z }, hit), roadYaw: hit.seg.yaw };
+  }
+  return { x: stop.x, z: stop.z, yaw: faceYaw(stop, hit), roadYaw: hit.seg.yaw };
+}
+
 export function planHkStreetGround(features, roads) {
   const segs = roadSegments(roads);
   const grid = buildGrid(segs);
@@ -356,12 +398,14 @@ export function planHkStreetGround(features, roads) {
   const stops = [];
   for (const stop of features?.stops || []) {
     const hit = nearestRoad(grid, stop.x, stop.z, 22);
-    const inRoad = !!(hit && hit.d < hit.seg.half - 0.2);
+    const seated = seatStop(stop, hit);
+    const lateral = hit ? Math.hypot(seated.x - hit.x, seated.z - hit.z) : Infinity;
+    const inRoad = !!(hit && lateral < hit.seg.half - 0.2);
     stops.push({
-      x: stop.x,
-      z: stop.z,
-      yaw: faceYaw(stop, hit),
-      roadYaw: hit ? hit.seg.yaw : 0,
+      x: seated.x,
+      z: seated.z,
+      yaw: seated.yaw,
+      roadYaw: seated.roadYaw,
       name: stop.name || '',
       shelter: !!stop.shelter,
       inRoad

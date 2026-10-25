@@ -25,7 +25,7 @@ import { GEO } from './geo-source.js';
 import { HK_CANYON_HEIGHT, canyonGlassWalls, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
 import { omitPlandCorridorGlass } from './hk-pland-frame.js';
 import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
-import { HK_BUS_SHELTER, planHkStreetGround } from './hk-pedestrian.js';
+import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from './hk-pedestrian.js';
 import { planHkRoadDeck } from './hk-road-deck.js';
 
 // Hong Kong coast, Victoria Harbour, and the centreline asphalt deck. Lots stay in buildings.js.
@@ -362,16 +362,7 @@ function buildHkPedestrianGround(group) {
   for (const stop of plan.stops) {
     const shelter = HK_BUS_SHELTER;
     poles.push({ x: stop.x, z: stop.z, yaw: 0, w: shelter.poleW, len: shelter.poleW });
-    if (stop.shelter && !stop.inRoad) {
-      const away = stop.yaw + Math.PI;
-      roofs.push({
-        x: stop.x + Math.sin(away) * shelter.roofSetback,
-        z: stop.z + Math.cos(away) * shelter.roofSetback,
-        yaw: stop.roadYaw,
-        w: shelter.roofW,
-        len: shelter.roofLen
-      });
-    }
+    if (stop.shelter && !stop.inRoad) roofs.push(hkShelterRoofPose(stop, shelter));
     if (stop.name && typeof document !== 'undefined') {
       let mat = labels.get(stop.name);
       if (!mat) {
