@@ -244,7 +244,6 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
     boxLocal: false
   });
   wallMat.name = 'hkCanyonGlass';
-  const ribbons = walls.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const lookSolids = gltfPlan?.lookSolids || [];
   const glass = gltfMeshes.length || lookSolids.length ? canyonGlassWalls(walls, gltfMeshes, {
     eye: HK_STREET_EYE,
@@ -252,9 +251,11 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
     sidewalk: ISLAND_BOUNDS.sidewalkHeight,
     solids: lookSolids
   }) : walls;
-  // Retail ribbons stay, including the proven-empty Des Voeux curb. Only the
-  // curtain yields inside the Digit1 corridor while the PlanD clip is mounted.
+  // Retail and curtain both yield in the Digit1 corridor while PlanD is mounted.
+  // HkCentralStreetWalls is the orange/black shopfront canyon in that view.
   const plandOn = gltfPlan?.plandMode === 'donor' || gltfPlan?.plandMode === 'compare';
+  const shownWalls = omitPlandCorridorGlass(walls, { enabled: plandOn });
+  const ribbons = shownWalls.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const glassShown = omitPlandCorridorGlass(glass, { enabled: plandOn });
   const glassRibbons = glassShown.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const baseY = 0.16;
@@ -262,7 +263,7 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
   const glassH = Math.max(0.4, HK_CANYON_HEIGHT - baseH);
   addHkRibbonMesh(group, retailMat, ribbons, baseY, baseH, 'HkCentralStreetWalls', 1);
   addHkRibbonMesh(group, wallMat, glassRibbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
-  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; glass ${glass.length} look, ${glassShown.length} after PlanD corridor`);
+  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; retail ${shownWalls.length} glass ${glass.length} look, ${glassShown.length} after PlanD corridor`);
   return walls.map((wall) => ({
     minX: wall.minX,
     maxX: wall.maxX,

@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_STREET_EYE, ISLAND_BOUNDS } from '../js/city-config.js';
+import { HK_CURB_W, HK_WALK_W } from '../js/hk-road-deck.js';
 import { hk80ToWorld } from '../js/hk-gltf-frame.js';
 import {
   PLAND_ATTRIBUTION,
@@ -237,7 +238,8 @@ test('PlanD drops the low Des Voeux carriageway shell and keeps a lot face', () 
   const segments = desVoeuxCarriageSegments();
   assert.ok(segments.length > 8);
   assert.equal(PLAND_STREET_SHELL_TOP, 4.5);
-  assert.equal(PLAND_STREET_SHELL_APRON, 0.75);
+  // Kerb plus sidewalk, short of the building line. 0.75 m left the walk scraps.
+  assert.equal(PLAND_STREET_SHELL_APRON, HK_CURB_W + HK_WALK_W - 0.4);
   const eyeRoad = plandCarriageDistance(HK_STREET_EYE.x, HK_STREET_EYE.z, segments);
   assert.ok(eyeRoad.dist < 0.5, eyeRoad.dist);
   assert.ok(Math.abs(eyeRoad.half - 3.3) < 0.05, eyeRoad.half);
@@ -247,14 +249,25 @@ test('PlanD drops the low Des Voeux carriageway shell and keeps a lot face', () 
     { x: HK_STREET_EYE.x + 0.2, y: 3.1, z: HK_STREET_EYE.z + 0.7 },
     segments
   ), true);
+  // A corner on the asphalt and a vertex up the shell is the jagged scrap #21 kept.
   assert.equal(plandOmitsCarriageShell(
     { x: HK_STREET_EYE.x, y: 2, z: HK_STREET_EYE.z },
     { x: HK_STREET_EYE.x + 0.8, y: 12, z: HK_STREET_EYE.z },
     { x: HK_STREET_EYE.x, y: 6, z: HK_STREET_EYE.z + 0.8 },
     segments
-  ), false);
+  ), true);
   const rx = -Math.cos(HK_STREET_EYE.heading);
   const rz = Math.sin(HK_STREET_EYE.heading);
+  const walk = {
+    x: HK_STREET_EYE.x + rx * (eyeRoad.half + 1.5),
+    z: HK_STREET_EYE.z + rz * (eyeRoad.half + 1.5)
+  };
+  assert.equal(plandOmitsCarriageShell(
+    { x: walk.x, y: 1.2, z: walk.z },
+    { x: walk.x + 0.4, y: 7.5, z: walk.z },
+    { x: walk.x, y: 3, z: walk.z + 0.4 },
+    segments
+  ), true);
   const lot = { x: HK_STREET_EYE.x + rx * 8, z: HK_STREET_EYE.z + rz * 8 };
   const lotRoad = plandCarriageDistance(lot.x, lot.z, segments);
   assert.ok(lotRoad.dist > eyeRoad.half + PLAND_STREET_SHELL_APRON + 2, lotRoad.dist);
@@ -294,7 +307,7 @@ test('PlanD yields on the street side of Henderson and keeps the mid-street phot
   assert.equal(plandYieldsToLandsd({ x: 190, y: 31.7, z: 91.1 }, boxes), false);
 });
 
-test('corridor glass yields to PlanD and the Digit1 shopfront ribbon is not that list', () => {
+test('corridor glass and the Digit1 shopfront ribbon both yield to PlanD', () => {
   const eye = HK_STREET_EYE;
   const forward = Math.sin(eye.heading);
   const ahead = Math.cos(eye.heading);
@@ -334,9 +347,11 @@ test('corridor glass yields to PlanD and the Digit1 shopfront ribbon is not that
   assert.equal(omitPlandCorridorGlass([gap], { enabled: false }).length, 1);
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
   assert.match(grid, /omitPlandCorridorGlass\(glass/);
+  assert.match(grid, /omitPlandCorridorGlass\(walls/);
   assert.match(grid, /retailMat, ribbons/);
-  assert.doesNotMatch(grid, /omitPlandCorridorGlass\(ribbons/);
-  assert.doesNotMatch(grid, /omitPlandCorridorGlass\(walls/);
+  const streets = readFileSync(path.join(root, 'js/street-details.js'), 'utf8');
+  assert.match(streets, /omitPlandCorridorGlass\(walls/);
+  assert.match(streets, /planHkCanyonNeon\(shown\)/);
 });
 
 test('boot wires the flag, the fetch tool, and no street-view atlas bake', () => {

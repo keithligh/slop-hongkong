@@ -1,8 +1,8 @@
 # PlanD photo-realistic mesh — Central corridor
 
-The Des Voeux chase loads a Planning Department 3D Photo-realistic Model as a street-corridor donor. The mesh is real PlanD capture. It is on without `?pland=donor`. `?pland=off` leaves the procedural corridor. LandsD photographs stay mounted in the donor mode, and the canyon shopfront stays on ribbons the LandsD clip did not remove.
+The Des Voeux chase loads a Planning Department 3D Photo-realistic Model as a street-corridor donor. The mesh is real PlanD capture. It is on without `?pland=donor`. `?pland=off` leaves the procedural corridor, including the non-pale shopfront. LandsD photographs stay mounted in the donor mode. While the clip is mounted, both the curtain and the retail shopfront yield inside the Digit1 corridor. That shopfront is `HkCentralStreetWalls` / `hkRetailPodium` / `hkShopfrontAlbedo`: orange tile, black mouth, red and green sign bands. Left in place it is the near orange/black toy canyon, in front of the photograph. A ribbon outside the corridor still keeps it. Neon on a yielded ribbon is not hung.
 
-This is not a claim that the chase looks like Sleeping Dogs. A headless frame of the default eye is `artifacts/digit1-eye-east-sbs.png` (tip b0e2460 beside this cut). On that probe, NDC 0, −0.08 stays the shopfront RGB(91, 24, 22). NDC 0, 0.08 is Henderson photo RGB(44, 47, 61). NDC 0, 0 is PlanD photo RGB(49, 59, 53), not pale. The grid has no pale lit pixel.
+This is not a claim that the chase looks like Sleeping Dogs. A headless frame of the default eye is `artifacts/digit1-eye-east-sbs.png` (tip b0e2460 beside this cut). On that probe, NDC 0, −0.08 stays the shopfront RGB(91, 24, 22). NDC 0, 0.08 is Henderson photo RGB(44, 47, 61). NDC 0, 0 is PlanD photo RGB(49, 59, 53), not pale. The grid has no pale lit pixel. Those centre samples miss the left and right canyon. The shopfront there is the ribbon this cut omits while PlanD is mounted. Keith’s veto frame, not NDC 0, is the bar.
 
 ## What stays LandsD
 
@@ -10,9 +10,9 @@ This is not a claim that the chase looks like Sleeping Dogs. A headless frame of
 
 The default page, and `?pland=donor`, draw the PlanD corridor behind those meshes (`polygonOffset`, render order behind the LandsD group) so a hole can show the aerial surface. A triangle on the street side of a loaded LandsD box, within 16 m, is omitted. That is the 2017 shell in front of The Henderson, which otherwise paints a pale face over the photograph. A triangle inside the box stays. That skirt is unchanged.
 
-The Des Voeux eye sits on the carriageway, inside the 11-SW-8D street-wall box (`B344751569101063A0`, z from 29.2). Low triangles on the asphalt are not a street-side apron in front of a face, so the 16 m skirt does not drop them. The clip also keeps them: its ground test drops a triangle only when every corner is below the sidewalk plus 1.2 m, and the kerb shell has a corner above that while the high corner stays under world y 4.5. At mount, donor and compare both drop a triangle that meets the Des Voeux carriageway — tagged half-width plus 0.75 m, any corner or the centre — when its highest corner is below world y 4.5. That is the ripped aerial shell on the south kerb in the Digit1 chase, a few metres from the camera. A lot face off the carriageway stays, and so does a triangle that rises through 4.5 m. The shopfront ribbon is not this list.
+The Des Voeux eye sits on the carriageway, inside the 11-SW-8D street-wall box (`B344751569101063A0`, z from 29.2). Low triangles on the asphalt are not a street-side apron in front of a face, so the 16 m skirt does not drop them. The clip also keeps them: its ground test drops a triangle only when every corner is below the sidewalk plus 1.2 m. A kerb shell can clear that test with one corner and still spike several metres up. At mount, donor and compare drop a triangle when any corner or the centre meets the Des Voeux carriageway plus the sidewalk band (tagged half-width plus curb + walk − 0.4 m, 2.07 m). Height does not keep it. That is the ripped aerial shell on the south kerb, including the slivers whose high corner is above world y 4.5. A lot face clear of that band stays. The corridor shopfront is a separate list and is omitted with the curtain, not by this triangle test.
 
-Canyon glass inside that same corridor is omitted while the clip is mounted, so `hkCanyonGlass` is not a toy band in front of the photograph. The shopfront mesh is a different list and stays, including the proven-empty Des Voeux curb past the 80 m disc. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that glass omit. Unknown values, including any street-view bake, leave PlanD off.
+Canyon glass and the retail shopfront inside that same corridor are omitted while the clip is mounted, so neither `hkCanyonGlass` nor `hkShopfrontAlbedo` is a toy band in front of the photograph. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that omit, and the shopfront stays non-pale. Unknown values, including any street-view bake, leave PlanD off.
 
 ## Not a street-view atlas
 
@@ -44,7 +44,7 @@ node tools/fetch-pland-central.mjs --format CESIUM --keep-zip
 
 OBJ is the page path. Each zip is one Altizure mesh (`config.json`, one `.obj`, one `.mtl`, four JPEGs), on the order of 80–250 MB compressed and one continuous surface, not a building. The tool clips that surface to the Digit1 corridor and writes `hk-3d/pland/manifest.json` plus `tile_…/corridor.gltf`. `hk-3d/` is gitignored. OSGB and CESIUM are the same capture; the tool can store those zips, and the page does not load them. A missing manifest leaves LandsD as it is.
 
-The clip drops triangles whose highest corner is below the sidewalk plus 1.2 m, so the road carpet is not a second carriageway. A facade that still touches the pavement stays. A triangle on the asphalt with one corner above 1.2 m stays in the glTF. The page drops it later when it meets the Des Voeux carriageway and the high corner is below world y 4.5. Triangles outside the chase corridor (500 m along heading 1.29, 72 m to either side) are dropped.
+The clip drops triangles whose highest corner is below the sidewalk plus 1.2 m, so the road carpet is not a second carriageway. A facade that still touches the pavement stays. A triangle on the asphalt with one corner above 1.2 m stays in the glTF. The page drops it later when it meets the Des Voeux carriageway or the sidewalk band, at any height. Triangles outside the chase corridor (500 m along heading 1.29, 72 m to either side) are dropped.
 
 ## CRS
 
@@ -83,7 +83,7 @@ Default: request `hk-3d/pland/manifest.json` and mount the clip as a donor when 
 
 | Query | What mounts |
 | --- | --- |
-| (none), `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them, corridor curtain omitted |
+| (none), `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them, corridor curtain and shopfront omitted |
 | `?pland=0`, `?pland=off` | LandsD only. Corridor curtain stays |
 | `?pland=compare`, `?pland=ab` | PlanD corridor, LandsD individualised meshes left unmounted |
 
@@ -103,7 +103,7 @@ Person chase only. A helicopter or a flyover is not the comparison.
 
 The same three with `?pland=compare` are the A-B. Heading 1.29, person mode. What you should expect:
 
-- Donor: LandsD charts that already have a photograph stay in front. A triangle that was only LandsD atlas padding is a hole, and the 2017 aerial surface can show through it. If the PlanD shell sits proud of the LandsD shell, it will cover the photograph. That offset was not checked on a GPU. On the Des Voeux carriageway the low shell is not drawn: highest corner below world y 4.5, within the tagged half-width plus 0.75 m. The south kerb at this eye is the deck, the shopfront, and LandsD behind them. PlanD further along the corridor, off the carriageway, stays.
+- Donor: LandsD charts that already have a photograph stay in front. A triangle that was only LandsD atlas padding is a hole, and the 2017 aerial surface can show through it. If the PlanD shell sits proud of the LandsD shell, it will cover the photograph. That offset was not checked on a GPU. On the Des Voeux carriageway and sidewalk the shell is not drawn, at any height, out to 2.07 m past the tagged half-width. The south kerb at this eye is the deck and whatever LandsD or PlanD face is actually there. The corridor shopfront is not drawn in front of them. PlanD further along the corridor, off that band, stays.
 - Compare: the corridor is the continuous 2017 mesh, including roofs and the old Murray Road site. It is a different year from the LandsD individualised model, not a repaired 2024 podium.
 - Neither view is a present-day shopfront survey.
 
@@ -137,7 +137,7 @@ PlanD publishes the model for reference. The department does not warrant fitness
 - Donor depth offset is unverified on WebGPURenderer. Compare mode is the check that does not depend on it.
 - Corridor extrudes are hidden whenever the manifest loads. A gap in the clip is empty rather than a glass wall.
 - No collider on the PlanD mesh, so the person walks through it.
-- Low triangles on the Des Voeux carriageway are omitted at mount. A PlanD face off that carriageway still draws, including a south-lot shell past the sidewalk where LandsD has a hole.
+- Triangles that meet the Des Voeux carriageway or sidewalk band are omitted at mount, at any height. A PlanD face clear of that band still draws, including a south-lot shell past the sidewalk where LandsD has a hole.
 - Full-tile OBJ is too heavy to mount. The page mounts the clip only: 703,058 triangles on `tile_21_26` and 857,179 on `tile_22_26`. That is the capture, not a decimated mesh, and it is a heavy browser load. GSD in these configs is about 0.06 m.
 - OSGB and CESIUM are not on the runtime path.
 - This environment captured the default eye and the south station, without LandsD sheets (`artifacts/digit1-eye-east-kerb.png`, the `?pland=off` frame, and `artifacts/digit1-eye-east-kerb-south.png`). The 25 m camera was not captured here. Henderson in front of PlanD is the 16 m skirt test.

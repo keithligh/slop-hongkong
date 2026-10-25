@@ -10,6 +10,7 @@ import {
 } from './city-config.js';
 import { GEO } from './geo-source.js';
 import { gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
+import { HK_CURB_W, HK_WALK_W } from './hk-road-deck.js';
 
 // PlanD 3D Photo-realistic Model (規劃署). OBJ tiles are Altizure exports:
 // Z-up, local X east, local Y north, local Z = HKPD. config.json model_transform
@@ -35,12 +36,12 @@ export const PLAND_CAPTURE = 'Hong Kong Island aerial photographs, March 2017; t
 // Metres above the sidewalk. Triangles entirely below this are the road carpet.
 // A facade that still touches the pavement is kept, because the test is the highest corner.
 export const PLAND_GROUND_CLEARANCE = 1.2;
-// World y. The carriageway shell at the Des Voeux eye is triangles the 1.2 m
-// test keeps because one corner clears it, with the high corner still below this.
-// A face that rises through it stays. The sidewalk is 0.22 m, so this is about 4.3 m up.
+// Old height band. A high corner no longer keeps a triangle that meets the
+// carriageway or the sidewalk: that spike is the jagged kerb scrap.
 export const PLAND_STREET_SHELL_TOP = 4.5;
-// Metres outside the tagged half-width. Covers the granite kerb without the lot face.
-export const PLAND_STREET_SHELL_APRON = 0.75;
+// Metres outside the tagged half-width. Kerb plus sidewalk, 0.4 m short of the
+// building line (curb 0.42 + walk 2.05), so a lot-face vertex is not this band.
+export const PLAND_STREET_SHELL_APRON = HK_CURB_W + HK_WALK_W - 0.4;
 // Vertices inside this radius of the Des Voeux eye set the HKPD of the pavement.
 // The OBJ also contains heights down to about −188 m. Snapping that minimum
 // to the sidewalk would lift the street into the sky.
@@ -543,17 +544,14 @@ function pointOnCarriageway(x, z, segments, apron) {
 }
 
 // Mount-time. The fetch clip keeps a triangle when any corner clears the 1.2 m
-// carpet, so an aerial triangle on the asphalt whose high corner is a few metres
-// up stays in the glTF. At the Des Voeux eye that is the ripped shell on the
-// south kerb. A corner on the carriageway, below the shell top, is dropped.
-// A lot face off the carriageway stays, and so does anything tall enough to be a facade.
+// carpet, so an aerial sliver can sit on the asphalt with one vertex metres up.
+// At the Des Voeux eye that sliver is the jagged grey scrap on the kerb. Any
+// corner or the centre in the carriageway-plus-sidewalk band drops the triangle,
+// however high the other vertex is. A lot face clear of that band stays.
 export function plandOmitsCarriageShell(a, b, c, segments, {
-  top = PLAND_STREET_SHELL_TOP,
   apron = PLAND_STREET_SHELL_APRON
 } = {}) {
   if (!segments?.length || !a || !b || !c) return false;
-  const maxY = Math.max(a.y, b.y, c.y);
-  if (!(Number.isFinite(maxY) && maxY < top)) return false;
   const points = [a, b, c, {
     x: (a.x + b.x + c.x) / 3,
     z: (a.z + b.z + c.z) / 3
@@ -622,11 +620,13 @@ export function resolvePlandRequest(href) {
   }
 }
 
-// Curtain only. The retail shopfront is a separate mesh and must not be passed
-// here. Samples inside the Digit1 chase corridor are dropped so the 2017 photo
-// mass is not hidden behind hkCanyonGlass. The 80 m disc is not this test, and
-// a ribbon outside the corridor keeps its glass. Shopfront cells stay on the
-// caller’s other list, including the proven-empty Des Voeux curb.
+// Canyon ribbons in the Digit1 chase corridor. Glass and the retail shopfront
+// are the same kind of stand-in: while the PlanD clip is mounted, either one
+// hides the 2017 photograph. The retail mesh is HkCentralStreetWalls. Its atlas
+// is the orange tile, black mouth, and red/green sign bands. Pass that list
+// here too. ?pland=off leaves `enabled` false, so the non-pale shopfront stays.
+// A ribbon outside the corridor keeps both faces. The 80 m LandsD disc is not
+// this test.
 export function omitPlandCorridorGlass(walls, {
   enabled = false,
   eye = HK_STREET_EYE,

@@ -3,6 +3,7 @@ import { Fn, float, smoothstep, texture, uniform } from 'three/tsl';
 import { HK_STREET_EYE, HK_STREET_NEAR, hkCentralSignSites } from './city-config.js';
 import { clipCanyonWalls } from './hk-ground-fill.js';
 import { centralCanyonWalls, planHkCanyonNeon } from './hk-neon.js';
+import { omitPlandCorridorGlass } from './hk-pland-frame.js';
 import { cityUniforms } from './tsl-materials.js';
 
 // Street-name plates, plus hanging boards and neon strips on the canyon face.
@@ -224,7 +225,9 @@ function buildStreetDetails(scene, gltfPlan = null) {
     eye: HK_STREET_EYE,
     near: HK_STREET_NEAR
   } : {});
-  const neon = planHkCanyonNeon(walls);
+  const plandOn = gltfPlan?.plandMode === 'donor' || gltfPlan?.plandMode === 'compare';
+  const shown = omitPlandCorridorGlass(walls, { enabled: plandOn });
+  const neon = planHkCanyonNeon(shown);
   addInstancedSigns(group, neon.signs, true);
   addArms(group, neon.arms);
   refreshSignFonts();
