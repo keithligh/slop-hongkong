@@ -8,6 +8,7 @@ import {
   planPlandManifest,
   plandLocalToWorld,
   plandOmitsCarriageShell,
+  plandOmitsDigit1LookGround,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
   resolvePlandRequest,
@@ -115,15 +116,16 @@ function finishBaked(geo) {
 // are passed. The carriageway shell is both modes. It is the low aerial
 // triangles on Des Voeux that the 1.2 m carpet test kept. The podium omit is
 // the centre inside a near box, below the retail band, after those two tests.
-// A higher centre stays. A far box is not punched.
+// A higher centre stays. A far box is not punched. The Digit1 look yield is
+// both modes too: it drops street-height centroids on the chase ray, which
+// is where the mid-road melt sits after the apron has already ended.
 function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   const roads = segments || [];
-  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0 };
-  if (!boxes?.length && !roads.length) return { geo: finishBaked(geo), landsd: 0, shell: 0, podium: 0 };
+  if (!geo) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0, podium: 0, look: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
@@ -131,6 +133,7 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
   let landsd = 0;
   let shell = 0;
   let podium = 0;
+  let look = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -161,6 +164,10 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
       podium++;
       continue;
     }
+    if (plandOmitsDigit1LookGround(mid)) {
+      look++;
+      continue;
+    }
     const p = written * 9;
     keptPos[p] = a[0];
     keptPos[p + 1] = a[1];
@@ -183,11 +190,11 @@ function trimPlandInFrontOfLandsd(geo, boxes, segments) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, landsd, shell, podium };
+  if (!written) return { geo: null, landsd, shell, podium, look };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), landsd, shell, podium, kept: written };
+  return { geo: finishBaked(next), landsd, shell, podium, look, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -230,6 +237,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let yielded = 0;
   let shell = 0;
   let podium = 0;
+  let look = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
   const segments = desVoeuxCarriageSegments();
@@ -245,6 +253,7 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         yielded += trimmed.landsd;
         shell += trimmed.shell;
         podium += trimmed.podium;
+        look += trimmed.look;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -272,5 +281,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (yielded) console.info(`[pland] omitted ${yielded} triangles on the street side of a LandsD box`);
   if (shell) console.info(`[pland] omitted ${shell} low triangles on the Des Voeux carriageway`);
   if (podium) console.info(`[pland] omitted ${podium} podium triangles inside near LandsD boxes`);
-  return { loaded, failed, triangles, yielded, shell, podium, group };
+  if (look) console.info(`[pland] omitted ${look} triangles on the Digit1 mid-road look`);
+  return { loaded, failed, triangles, yielded, shell, podium, look, group };
 }

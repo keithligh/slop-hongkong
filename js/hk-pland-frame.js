@@ -52,6 +52,18 @@ export const PLAND_STREET_SHELL_TOP = 4.5;
 // Metres outside the tagged half-width. Kerb plus sidewalk, 0.4 m short of the
 // building line (curb 0.42 + walk 2.05), so a lot-face vertex is not this band.
 export const PLAND_STREET_SHELL_APRON = HK_CURB_W + HK_WALK_W - 0.4;
+// Digit1 chase look, not the Des Voeux centreline. Heading 1.29 leaves the
+// ~7 m apron near 70 m. The mid-road melt is on the look (side ~0.3 m) and
+// about 14 m off that centreline, so a wider apron never reaches it.
+// Along 8–216 m, 16 m either side of the ray, centroids below 18 m.
+// 12 m still leaves the mat_tex_2 sheet at along ~151 m (centroid y ~16.4).
+// 216 m stops short of the Henderson shell at along ~223 m, which the 16 m
+// skirt still owns. A lot face outside the half-width stays. A centroid at
+// 18 m or above stays, so this is not a full-height punch.
+export const PLAND_DIGIT1_LOOK_ALONG_MIN = 8;
+export const PLAND_DIGIT1_LOOK_ALONG_MAX = 216;
+export const PLAND_DIGIT1_LOOK_HALF = 16;
+export const PLAND_DIGIT1_LOOK_Y_CLEAR = 18;
 // Vertices inside this radius of the Des Voeux eye set the HKPD of the pavement.
 // The OBJ also contains heights down to about −188 m. Snapping that minimum
 // to the sidewalk would lift the street into the sky.
@@ -570,6 +582,34 @@ export function plandOmitsCarriageShell(a, b, c, segments, {
     if (pointOnCarriageway(point.x, point.z, segments, apron)) return true;
   }
   return false;
+}
+
+// Mount-time. Apron omit only covers the Des Voeux carriageway. The Digit1
+// centre ray is off that apron by ~80 m and hits PlanD on the look itself:
+// mat_tex_1 around (80.3, 10.3, 52.9), then a mat_tex_2 sheet near along 151 m
+// at centroid y ~16. Drop those centroids. The Henderson shell past the along
+// cap is a different test (the street-side skirt).
+export function plandOmitsDigit1LookGround(point, {
+  eye = HK_STREET_EYE,
+  alongMin = PLAND_DIGIT1_LOOK_ALONG_MIN,
+  alongMax = PLAND_DIGIT1_LOOK_ALONG_MAX,
+  half = PLAND_DIGIT1_LOOK_HALF,
+  yClear = PLAND_DIGIT1_LOOK_Y_CLEAR
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < yClear)) return false;
+  const heading = Number.isFinite(eye?.heading) ? eye.heading : HK_STREET_EYE.heading;
+  const ox = Number.isFinite(eye?.x) ? eye.x : HK_STREET_EYE.x;
+  const oz = Number.isFinite(eye?.z) ? eye.z : HK_STREET_EYE.z;
+  const fx = Math.sin(heading);
+  const fz = Math.cos(heading);
+  const dx = point.x - ox;
+  const dz = point.z - oz;
+  const along = dx * fx + dz * fz;
+  if (along < alongMin || along > alongMax) return false;
+  const side = dx * -fz + dz * fx;
+  if (Math.abs(side) > half) return false;
+  return true;
 }
 
 export function plandYieldsToLandsd(point, boxes, {

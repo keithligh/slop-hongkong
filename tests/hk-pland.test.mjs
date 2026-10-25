@@ -15,11 +15,16 @@ import {
   PLAND_PODIUM_FACE,
   plandOmitsPodiumInsideLandsd,
   plandYieldsToLandsd,
+  PLAND_DIGIT1_LOOK_ALONG_MAX,
+  PLAND_DIGIT1_LOOK_ALONG_MIN,
+  PLAND_DIGIT1_LOOK_HALF,
+  PLAND_DIGIT1_LOOK_Y_CLEAR,
   PLAND_STREET_SHELL_APRON,
   PLAND_STREET_SHELL_TOP,
   desVoeuxCarriageSegments,
   plandCarriageDistance,
   plandOmitsCarriageShell,
+  plandOmitsDigit1LookGround,
   PLAND_DIGIT1_CAMERAS,
   PLAND_TILE_21_26_SAMPLE,
   PLAND_TILE_21_26_TRANSFORM,
@@ -300,6 +305,69 @@ test('PlanD drops the low Des Voeux carriageway shell and keeps a lot face', () 
   assert.match(page, /desVoeuxCarriageSegments/);
 });
 
+function digit1LookPoint(along, side, y) {
+  const fx = Math.sin(HK_STREET_EYE.heading);
+  const fz = Math.cos(HK_STREET_EYE.heading);
+  return {
+    x: HK_STREET_EYE.x + fx * along - fz * side,
+    y,
+    z: HK_STREET_EYE.z + fz * along + fx * side
+  };
+}
+
+test('PlanD yields the Digit1 mid-road look and keeps the Henderson shell', () => {
+  assert.equal(PLAND_DIGIT1_LOOK_ALONG_MIN, 8);
+  assert.equal(PLAND_DIGIT1_LOOK_ALONG_MAX, 216);
+  assert.equal(PLAND_DIGIT1_LOOK_HALF, 16);
+  assert.equal(PLAND_DIGIT1_LOOK_Y_CLEAR, 18);
+  const segments = desVoeuxCarriageSegments();
+  // MSI centre hit on tile_21_26 / mat_tex_1. Off the Des Voeux apron, on the look.
+  const slime = { x: 80.35, y: 10.37, z: 53.23 };
+  const road = plandCarriageDistance(slime.x, slime.z, segments);
+  assert.ok(road.dist > 14, road.dist);
+  assert.ok(road.dist > road.half + PLAND_STREET_SHELL_APRON, road.dist);
+  assert.equal(plandOmitsCarriageShell(
+    slime,
+    { x: slime.x + 0.25, y: 10.4, z: slime.z },
+    { x: slime.x, y: 10.2, z: slime.z + 0.25 },
+    segments
+  ), false);
+  assert.equal(plandOmitsDigit1LookGround(slime), true);
+  // centre_low, same station, y in the 6.4–11 band.
+  assert.equal(plandOmitsDigit1LookGround({ x: 80.35, y: 6.4, z: 53.23 }), true);
+  assert.equal(plandOmitsDigit1LookGround({ x: 80.35, y: 11, z: 53.23 }), true);
+  // Next sheet on the centre ray after the melt. y 12 would keep this one.
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(151.43, -0.02, 16.04)), true);
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(209.39, 0.52, 12.23)), true);
+  // Apron-only point is the shell test. The look starts at 8 m.
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(2, 0, 1.4)), false);
+  assert.equal(plandOmitsCarriageShell(
+    { x: HK_STREET_EYE.x, y: 1.4, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x + 0.4, y: 2, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x, y: 2, z: HK_STREET_EYE.z + 0.4 },
+    segments
+  ), true);
+  // Lot face outside the half-width, and the facade above the street band.
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(90, 22, 8)), false);
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(120, 0, 18)), false);
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(120, 0, 24)), false);
+  assert.equal(plandOmitsDigit1LookGround(digit1LookPoint(40, 0, 6)), true);
+  // Henderson shell stays on the skirt test. The along cap does not eat it.
+  const shell = digit1LookPoint(223.15, 0.06, 22.36);
+  assert.equal(plandOmitsDigit1LookGround(shell), false);
+  assert.equal(plandOmitsDigit1LookGround({ x: 212.8, y: 31.7, z: 91.1 }), false);
+  assert.equal(plandYieldsToLandsd(shell, [{
+    minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21
+  }]), true);
+  assert.equal(plandOmitsDigit1LookGround(null), false);
+  assert.equal(plandOmitsDigit1LookGround({ x: slime.x, y: Number.NaN, z: slime.z }), false);
+  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
+  assert.match(page, /plandOmitsDigit1LookGround/);
+  assert.match(page, /omitted \$\{look\} triangles on the Digit1 mid-road look/);
+  assert.match(page, /omitted \$\{shell\} low triangles on the Des Voeux carriageway/);
+  assert.match(page, /omitted \$\{podium\} podium triangles inside near LandsD boxes/);
+});
+
 test('PlanD yields on the street side of Henderson and keeps the mid-street photo point', () => {
   const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
   const west = { minX: 29.4, maxX: 86.2, minZ: -43, maxZ: 35.4, minH: 4.4, maxH: 44.6 };
@@ -433,6 +501,8 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.nullFillEdge, 1024);
   assert.equal(gate.orangeCanyonGone, true);
   assert.equal(gate.hendersonInFront, true);
+  assert.equal(gate.ndcCentreNotPland, true);
+  assert.equal(gate.midRoadSlimeGone, true);
   assert.equal(gate.pass, true);
 });
 
