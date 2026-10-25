@@ -533,6 +533,111 @@ export const HK_BOC_PHOTO_CHART = Object.freeze({
   span: 68.5
 });
 
+// Digit1 mid-band plates. Live picks from the Des Voeux eye, heading 1.29.
+// Cut #36 (2026-10-25) bounds-tested BUILDING glTF against these points.
+// HK1980 of the hits is about E 834589–834649, N 815701–815734, inside 11-SW-9C.
+export const HK_DIGIT1_MIDBAND_HITS = Object.freeze([
+  Object.freeze({ name: 'right_midfar', x: 84.9, y: 14.7, z: 77.3 }),
+  Object.freeze({ name: 'right_midfar_up', x: 80.9, y: 18.3, z: 71.1 }),
+  Object.freeze({ name: 'left_midfar', x: 141.2, y: 21.6, z: 44.1 })
+]);
+
+// No entry until a LandsD BUILDING mesh contains the hits. An empty list is the miss.
+export const HK_MIDBAND_PHOTO_CHARTS = Object.freeze([]);
+
+// Closest BUILDING mesh on each sheet whose rectangle is within 200 m of a hit.
+// Id radius 280 m. A mesh that contained a hit would carry an id point on that
+// building, so an id farther than the longest sheet mesh (~185 m on 8D) cannot
+// hide a cover. Sheet-wide GENERIC / TERRAIN / VEGETATION tiles are not buildings:
+// their boxes are the whole of 11-SW-9C and are not a facade.
+export const HK_DIGIT1_MIDBAND_HUNT = Object.freeze([
+  Object.freeze({
+    sheet: '11-SW-9C',
+    buildingGltf: 73,
+    idRadiusM: 280,
+    tested: 41,
+    closestM: 25.5,
+    closestId: 'B345471572201063A0',
+    minX: 12.9,
+    maxX: 55.4,
+    minZ: 49.8,
+    maxZ: 95.7
+  }),
+  Object.freeze({
+    sheet: '11-SW-8D',
+    buildingGltf: 781,
+    idRadiusM: 280,
+    tested: 18,
+    closestM: 67.5,
+    closestId: 'B344751569101063A0',
+    minX: -66.9,
+    maxX: 13.4,
+    minZ: 29.2,
+    maxZ: 102.1
+  }),
+  Object.freeze({
+    sheet: '11-SW-14A',
+    buildingGltf: 204,
+    idRadiusM: 280,
+    tested: 15,
+    closestM: 80.1,
+    closestId: 'B345371559501063A0',
+    minX: -8.6,
+    maxX: 61.9,
+    minZ: 154.0,
+    maxZ: 222.8
+  }),
+  Object.freeze({
+    sheet: '11-SW-13B',
+    buildingGltf: 342,
+    idRadiusM: 280,
+    tested: 8,
+    closestM: 155.7,
+    closestId: 'B343871555501063A0',
+    minX: -128.9,
+    maxX: -43.1,
+    minZ: 165.9,
+    maxZ: 273.5
+  })
+]);
+
+// Sheets named by the cut, eliminated on the 1:1000 grid (NW corner, 750 × 600 m).
+// Distance is the closest hit to the sheet rectangle. None was downloaded.
+export const HK_DIGIT1_MIDBAND_GRID_ELIMINATED = Object.freeze([
+  Object.freeze({ sheet: '11-SW-9D', minM: 601 }),
+  Object.freeze({ sheet: '11-SW-9A', minM: 466 }),
+  Object.freeze({ sheet: '11-SW-9B', minM: 760 }),
+  Object.freeze({ sheet: '11-SW-14B', minM: 615 }),
+  Object.freeze({ sheet: '11-SW-13A', minM: 846 }),
+  Object.freeze({ sheet: '11-SW-15A', minM: 1357 }),
+  Object.freeze({ sheet: '11-SW-10D', minM: 2101 }),
+  Object.freeze({ sheet: '11-SW-12C', minM: 2444 }),
+  Object.freeze({ sheet: '11-SW-8C', minM: 839 })
+]);
+
+// Closest non-BUILDING feature that is not a sheet-wide tile. Not a photograph to pin.
+export const HK_DIGIT1_MIDBAND_NOT_BUILDING = Object.freeze({
+  sheet: '11-SW-9C',
+  id: 'I346541564803063A0',
+  kind: 'INFRASTRUCTURE',
+  closestM: 18.7,
+  minX: 87.4,
+  maxX: 238.6,
+  minZ: 95.8,
+  maxZ: 172.8
+});
+
+export function hkGltfBoxContains(box, x, z, pad = 0) {
+  if (!box || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+  return x >= box.minX - pad && x <= box.maxX + pad && z >= box.minZ - pad && z <= box.maxZ + pad;
+}
+
+export function digit1MidbandChartsCover(charts = HK_MIDBAND_PHOTO_CHARTS, hits = HK_DIGIT1_MIDBAND_HITS, pad = 0) {
+  const list = charts || [];
+  if (!list.length || !hits?.length) return false;
+  return hits.every((hit) => list.some((box) => hkGltfBoxContains(box, hit.x, hit.z, pad)));
+}
+
 export function isGltfPinSheet(sheet) {
   return HK_GLTF_PIN_SHEETS.includes(String(sheet || '').trim().toUpperCase());
 }

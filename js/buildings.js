@@ -292,9 +292,10 @@ function buildCityBlocks(scene, gltfPlan = null) {
   return buildHkFootprintBlocks(scene, gltfPlan);
 }
 
-// Honest face for the Digit1 mid-band plates. No LandsD ring and no BUILDING
-// glTF cover those eye hits, so a blank PlanD omit would open onto distant
-// curtain. The wall is the look-frame plate: shopfront belt, glass above.
+// Honest face for the Digit1 mid-band plates. Cut #36 bounds-tested BUILDING
+// glTF on 11-SW-9C, 11-SW-8D, 11-SW-14A and 11-SW-13B. None contains the eye
+// hits (closest 25.5 m, Bank of China Building on 9C). A blank omit would open
+// onto distant curtain. The wall stays: shopfront belt, window grid above.
 // Compare keeps the 2017 mesh and does not draw this stand-in.
 // Kept off the footprint-extrude path: that path must not grow a box stand-in.
 function addDigit1MidbandWalls(group, gltfPlan) {

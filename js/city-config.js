@@ -231,6 +231,8 @@ const HK_NULL_HEIGHT = 'skip';
 // 11-SW-9C covers Statue Square and Des Voeux looking east. 11-SW-8D is the dense sheet on the west side of that corner.
 // 11-SW-14A is the pin sheet on the south edge of 9C. It holds the Bank of China Tower
 // photograph (B346831557701063A0). Only a mesh that covers that plate is mounted from it.
+// Digit1 mid-band hits are inside 9C and are not a second pin: 9C, 8D, 14A and 13B
+// leave those points outside every BUILDING mesh (closest 25.5 m). No extra sheet loads.
 // A missing manifest leaves the extrude fallback in place.
 const HK_GLTF_SHEETS = Object.freeze(['11-SW-9C', '11-SW-8D', '11-SW-14A']);
 const HK_GLTF_SHEET = HK_GLTF_SHEETS[0];

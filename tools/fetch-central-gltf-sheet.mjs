@@ -3,6 +3,8 @@
 // Default: 11-SW-9B, then 11-SW-9A when that sheet has no BUILDING model on Central.
 // --street subsets 11-SW-9C and 11-SW-8D down to BUILDING glTF that meet the Central box,
 // and 11-SW-14A down to the Bank of China Tower photograph.
+// Cut #36 did not add a mid-band sheet. Hits inside 11-SW-9C stay outside every
+// BUILDING mesh on 9C, 8D, 14A and 13B. Do not pin 13B for that miss.
 // No API key is sent unless the zip answers 401.
 //
 //   node tools/fetch-central-gltf-sheet.mjs
@@ -202,7 +204,9 @@ With no --sheet, 11-SW-9B is fetched first. If it has no BUILDING glTF overlappi
 --street downloads 11-SW-9C and 11-SW-8D, keeps BUILDING glTF intersecting the Central box
 (span at least ${STREET_MIN_SPAN} m), and drops the rest of each zip.
 It also downloads 11-SW-14A and keeps only the BUILDING mesh that covers the Bank of China Tower plate.
-The page loads those sheets when hk-3d/<sheet>/manifest.json is present.`;
+The page loads those sheets when hk-3d/<sheet>/manifest.json is present.
+No further Central sheet is pinned for the Digit1 mid-band. A bounds pass of BUILDING glTF
+on 11-SW-9C, 11-SW-8D, 11-SW-14A and 11-SW-13B leaves those hits outside every mesh.`;
 }
 
 async function main() {

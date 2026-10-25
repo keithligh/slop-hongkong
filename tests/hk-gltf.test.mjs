@@ -6,10 +6,17 @@ import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import {
   HK_BOC_PHOTO_CHART,
+  HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
+  HK_DIGIT1_MIDBAND_HITS,
+  HK_DIGIT1_MIDBAND_HUNT,
+  HK_DIGIT1_MIDBAND_NOT_BUILDING,
+  HK_MIDBAND_PHOTO_CHARTS,
   assertSheetAllowed,
   boundsFromGltf,
   chooseCentralSheet,
+  digit1MidbandChartsCover,
   filterPinSheetBuildings,
+  hkGltfBoxContains,
   footprintOverlapRatio,
   formatGltfLog,
   gltfCoversFootprint,
@@ -459,4 +466,31 @@ test('the 11-SW-14A pin sheet keeps the Bank of China photograph and drops a str
       && hit.z >= HK_BOC_PHOTO_CHART.minZ && hit.z <= HK_BOC_PHOTO_CHART.maxZ;
     assert.equal(inside, false);
   }
+});
+
+test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
+  assert.equal(HK_MIDBAND_PHOTO_CHARTS.length, 0);
+  assert.equal(digit1MidbandChartsCover(), false);
+  assert.equal(HK_DIGIT1_MIDBAND_HITS.length, 3);
+  const sheets = HK_DIGIT1_MIDBAND_HUNT.map((row) => row.sheet);
+  assert.deepEqual(sheets, ['11-SW-9C', '11-SW-8D', '11-SW-14A', '11-SW-13B']);
+  for (const row of HK_DIGIT1_MIDBAND_HUNT) {
+    assert.ok(row.closestM > 0);
+    assert.equal(assertSheetAllowed(row.sheet), row.sheet);
+    for (const hit of HK_DIGIT1_MIDBAND_HITS) {
+      assert.equal(hkGltfBoxContains(row, hit.x, hit.z), false);
+    }
+  }
+  for (const hit of HK_DIGIT1_MIDBAND_HITS) {
+    assert.equal(hkGltfBoxContains(HK_DIGIT1_MIDBAND_NOT_BUILDING, hit.x, hit.z), false);
+    assert.equal(hkGltfBoxContains(HK_BOC_PHOTO_CHART, hit.x, hit.z), false);
+  }
+  assert.ok(HK_DIGIT1_MIDBAND_NOT_BUILDING.closestM > 0);
+  for (const row of HK_DIGIT1_MIDBAND_GRID_ELIMINATED) {
+    assert.ok(row.minM >= 400);
+    assert.equal(assertSheetAllowed(row.sheet), row.sheet);
+  }
+  const nineC = HK_DIGIT1_MIDBAND_HUNT[0];
+  assert.equal(nineC.closestId, 'B345471572201063A0');
+  assert.equal(nineC.closestM, 25.5);
 });

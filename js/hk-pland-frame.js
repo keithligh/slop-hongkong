@@ -84,7 +84,7 @@ export const PLAND_FLANK_EYE_BOX = 12;
 // on the right) and off the centre ray to The Henderson. World y stops at the
 // flank canyon top, so the crown is not a full-height punch. Compare passes no
 // boxes, so the omit does not run. The replacement wall is HkMidbandCanyon
-// (shopfront belt and window grid; still chartless).
+// (shopfront belt and window grid; still chartless after the Cut #36 sheet hunt).
 export const DIGIT1_MIDBAND_PLATES = Object.freeze([
   Object.freeze({
     id: 'digit1-midband-right',
