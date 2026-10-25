@@ -13,9 +13,16 @@ import {
   hk80ToWorld,
   isGltfPinSheet,
   landsdAlbedoRow,
+  landsdChartPixels,
+  landsdChartRect,
+  landsdChartWrap,
+  landsdDilateGutter,
+  landsdGutterFraction,
+  landsdGutterMip,
   landsdNullFillTriangles,
   nullFillSampleSize,
   planGltfManifest,
+  remapLandsdChartUv,
   resolveHkGltfRequest
 } from './hk-gltf-frame.js';
 import { filterDigit1ProbeBuildings, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
@@ -95,47 +102,186 @@ export function setLandsdAnisotropyLimit(value) {
   anisotropyLimit = clampLandsdAnisotropy(value, value);
 }
 
-// Level 0 is the JPEG. Level 1 is half resolution, so the GPU may filter
-// anisotropically and still cannot select the deep mips where atlas fill
-// smears a street-height chart. The Digit1 chase past 80 m uses this same
-// upload. No second level is uploaded when the device cannot do anisotropy.
-function uploadNearFacadeMips(tex, anisotropy) {
-  const aniso = clampLandsdAnisotropy(anisotropy, anisotropyLimit);
-  tex.userData.hkFullRes = true;
+const GUTTER_MIP_FRACTION = 0.02;
+// A 4096² dilate is a load-time stall. Charts that were cropped are already
+// well under this. Full-bleed atlases still get a gutter-aware chain; only
+// the shore dilate is skipped when the pixel count is past the cap.
+const DILATE_PIXEL_CAP = 2048 * 2048;
+
+function uvBounds(geo) {
+  const uv = geo.getAttribute('uv');
+  if (!uv?.count) return null;
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  const visit = (i) => {
+    if (i < 0 || i >= uv.count) return;
+    const u = uv.getX(i);
+    const v = uv.getY(i);
+    if (u < minU) minU = u;
+    if (v < minV) minV = v;
+    if (u > maxU) maxU = u;
+    if (v > maxV) maxV = v;
+  };
+  const index = geo.getIndex();
+  if (index) {
+    const arr = index.array;
+    const start = geo.drawRange?.start || 0;
+    const count = geo.drawRange && Number.isFinite(geo.drawRange.count) ? geo.drawRange.count : arr.length;
+    const end = Math.min(arr.length, start + count);
+    for (let i = start; i < end; i++) visit(arr[i]);
+  } else {
+    for (let i = 0; i < uv.count; i++) visit(i);
+  }
+  if (!Number.isFinite(minU)) return null;
+  return { minU, minV, maxU, maxV };
+}
+
+function remapGeoUv(geo, rect) {
+  const uv = geo.getAttribute('uv');
+  if (!uv) return;
+  for (let i = 0; i < uv.count; i++) {
+    const [u, v] = remapLandsdChartUv(uv.getX(i), uv.getY(i), rect);
+    uv.setXY(i, u, v);
+  }
+  uv.needsUpdate = true;
+}
+
+function canvasFromPixels(data, width, height) {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(data), width, height), 0, 0);
+  return canvas;
+}
+
+function readImagePixels(img) {
+  const w = img?.width || 0;
+  const h = img?.height || 0;
+  if (!w || !h || typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0);
+  try {
+    return { data: ctx.getImageData(0, 0, w, h).data, width: w, height: h };
+  } catch {
+    return null;
+  }
+}
+
+function cropTextureToChart(tex, rect) {
+  const key = `${rect.u0},${rect.v0},${rect.u1},${rect.v1}`;
+  if (tex.userData.hkChartKey === key) return true;
+  if (tex.userData.hkChartKey) return false;
   const img = tex.image;
   const w = img?.width || 0;
   const h = img?.height || 0;
-  if (tex.userData.hkNearChain) {
-    tex.generateMipmaps = false;
-    tex.minFilter = THREE.LinearMipmapLinearFilter;
-    tex.anisotropy = aniso;
-    return;
-  }
-  // A second mip without anisotropic taps is only a blur. Keep the one-tap sample.
-  if (aniso < 2 || !(w >= 2 && h >= 2) || typeof document === 'undefined') {
-    tex.generateMipmaps = false;
-    tex.minFilter = THREE.LinearFilter;
-    tex.anisotropy = 1;
-    return;
-  }
+  const px = landsdChartPixels(rect, w, h);
+  if (!px || typeof document === 'undefined') return false;
   const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.floor(w / 2));
-  canvas.height = Math.max(1, Math.floor(h / 2));
-  const ctx = canvas.getContext('2d');
-  if (!ctx) {
-    tex.generateMipmaps = false;
-    tex.minFilter = THREE.LinearFilter;
-    tex.anisotropy = 1;
-    return;
+  canvas.width = px.width;
+  canvas.height = px.height;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, px.x0, px.y0, px.width, px.height, 0, 0, px.width, px.height);
+  tex.image = canvas;
+  tex.userData.hkChartKey = key;
+  tex.needsUpdate = true;
+  return true;
+}
+
+// Manual chain: level 0 is the (shore-dilated) photograph, and every deeper
+// level averages photograph texels only. generateMipmaps stays false so the
+// GPU does not replace this chain with one that blends the gutter back in.
+function uploadGutterMips(tex, pixels, anisotropy) {
+  let current = pixels;
+  if (current.width * current.height <= DILATE_PIXEL_CAP) {
+    current = {
+      data: landsdDilateGutter(current.data, current.width, current.height, 2),
+      width: current.width,
+      height: current.height
+    };
   }
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  tex.mipmaps = [img, canvas];
+  const levels = [];
+  let data = current.data;
+  let w = current.width;
+  let h = current.height;
+  const base = canvasFromPixels(data, w, h);
+  if (!base) return false;
+  levels.push(base);
+  while ((w > 1 || h > 1) && levels.length < 16) {
+    const next = landsdGutterMip(data, w, h);
+    const canvas = canvasFromPixels(next.data, next.width, next.height);
+    if (!canvas) return false;
+    levels.push(canvas);
+    data = next.data;
+    w = next.width;
+    h = next.height;
+  }
+  tex.image = levels[0];
+  tex.mipmaps = levels;
   tex.generateMipmaps = false;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = anisotropy;
+  tex.userData.hkChartMips = true;
+  tex.userData.hkFullRes = true;
+  tex.needsUpdate = true;
+  return true;
+}
+
+function uploadChaseMips(tex, sampler, wrap) {
+  if (tex.userData?.hkChartMips) return;
+  const aniso = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
+  tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = wrap === 'repeat' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  tex.wrapT = tex.wrapS;
+  tex.flipY = false;
   tex.anisotropy = aniso;
-  tex.userData.hkNearChain = true;
+  const pixels = readImagePixels(tex.image);
+  const gutter = pixels ? landsdGutterFraction(pixels.data, pixels.width, pixels.height, 4) : 0;
+  if (pixels && gutter >= GUTTER_MIP_FRACTION && uploadGutterMips(tex, pixels, aniso)) return;
+  tex.mipmaps = [];
+  tex.generateMipmaps = true;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.userData.hkChartMips = true;
+  tex.userData.hkFullRes = true;
+  tex.needsUpdate = true;
+}
+
+// Crop a sub-rectangle chart, remap its UVs into that crop, and mip the
+// photograph. Repeating primitives are not cropped. Called before sharpenPhoto
+// so null-fill omission still sees the file's own UVs.
+export function packLandsdChart(geo, material, sampler) {
+  if (!sampler?.chartMips || !geo) return null;
+  const bounds = uvBounds(geo);
+  if (!bounds) return null;
+  const wrap = landsdChartWrap(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV);
+  const rect = wrap === 'clamp'
+    ? landsdChartRect(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV)
+    : null;
+  const list = Array.isArray(material) ? material : [material];
+  let sawMap = false;
+  let cropped = true;
+  for (const mat of list) {
+    if (!mat) continue;
+    for (const key of PHOTO_MAPS) {
+      const tex = mat[key];
+      if (!tex?.isTexture || !tex.image) continue;
+      sawMap = true;
+      if (rect && !cropTextureToChart(tex, rect)) cropped = false;
+      if (key === 'map' || key === 'emissiveMap') tex.colorSpace = THREE.SRGBColorSpace;
+      uploadChaseMips(tex, sampler, wrap);
+    }
+  }
+  if (rect && sawMap && cropped) remapGeoUv(geo, rect);
+  return rect && cropped ? rect : null;
 }
 
 function buildingIdOf(entry) {
@@ -246,9 +392,25 @@ export function sharpenPhoto(material, sampler) {
       const tex = mat[key];
       if (!tex?.isTexture) continue;
       if (key === 'map' || key === 'emissiveMap') tex.colorSpace = THREE.SRGBColorSpace;
-      if (sampler.mipLevels === 2) {
-        uploadNearFacadeMips(tex, sampler.anisotropy);
-      } else if (sampler.mipmaps) {
+      if (tex.userData?.hkChartMips) {
+        tex.anisotropy = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
+        tex.needsUpdate = true;
+        continue;
+      }
+      if (sampler.chartMips) {
+        tex.flipY = false;
+        tex.wrapS = sampler.wrap === 'repeat' ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+        tex.wrapT = tex.wrapS;
+        tex.magFilter = THREE.LinearFilter;
+        tex.generateMipmaps = true;
+        tex.minFilter = THREE.LinearMipmapLinearFilter;
+        tex.anisotropy = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
+        tex.userData.hkChartMips = true;
+        tex.userData.hkFullRes = true;
+        tex.needsUpdate = true;
+        continue;
+      }
+      if (sampler.mipmaps) {
         if (!tex.userData.hkFullRes) limitPhoto(tex, sampler.maxEdge);
         tex.generateMipmaps = true;
         tex.minFilter = THREE.LinearMipmapLinearFilter;
@@ -413,7 +575,9 @@ export async function mountHkGltfBuildings(scene, plan) {
           geo.dispose();
           return;
         }
-        sharpenPhoto(obj.material, gltfAlbedoSampler(entry));
+        const sampler = gltfAlbedoSampler(entry);
+        packLandsdChart(geo, obj.material, sampler);
+        sharpenPhoto(obj.material, sampler);
         const mesh = new THREE.Mesh(geo, obj.material);
         mesh.name = 'HkGltfBuilding';
         mesh.castShadow = true;

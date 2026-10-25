@@ -2,8 +2,8 @@
 // Oblique shop-chart bench for the Digit1 near-field sampler.
 //   node tools/near-facade-bench.mjs
 // Writes tools/near-facade-bench-*.png and prints mid-band energy.
-// linear = the chase one-tap sampler. near = the 80 m two-level chain.
-// full = a generated mip chain with anisotropy, the sampler this cut does not ship.
+// linear = a one-tap sample. near = the retired two-level chain.
+// full = a generated mip chain. The shipped chase sampler is the chart pack in hk-gltf.js.
 
 import { createReadStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';

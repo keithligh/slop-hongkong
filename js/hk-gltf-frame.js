@@ -287,15 +287,16 @@ export function gltfTextureMaxEdge(entry, eye = HK_STREET_EYE, near = HK_GLTF_TE
   return gltfStreetPhoto(entry, eye, near) ? 0 : HK_GLTF_FAR_TEX;
 }
 
-// A native chase photograph is two levels: the 4096 file and one half-res
-// mip, sampled with anisotropy 16. That is the 80 m street disc and the
-// Digit1 look past it — The Henderson, Fairmont House, Lippo Centre, and
-// flank charts whose boxes cross the corridor. Anisotropy is legal only
-// when a second level exists. A full generated chain still walks into LandsD
-// atlas fill at a street angle (the muddy mip), so this sampler does not ask
-// for one. A mipmapped filter on a level that was never uploaded is the
-// brown patch. Off-look masses still keep a downscaled mip chain and
-// anisotropy 16.
+// A native chase photograph is the chart the mesh actually uses. FME packs
+// that chart into a sub-rectangle (Bank of China Tower _001 is u ≤ 0.125,
+// v ≤ 0.49 of a 4096² file; the Bank of China Building flank _002 is the
+// left half) and fills the rest with flat gutter. Repeat wrap plus a kernel
+// that can see that gutter is the flank tear. Two mip levels cannot minification-
+// filter a midfar wall, so the same charts alias into grain and stripes.
+// The chase sampler crops a sub-rectangle, clamps, and builds a mip chain
+// that does not average gutter into the photograph. A repeating primitive
+// (UVs outside the image) stays repeating. Off-look masses still keep a
+// downscaled mip chain and anisotropy 16.
 // LandsD null-fill triangles stay omitted. The sample uses glTF v = 0 as the
 // first image row, the same row flipY false uploads.
 
@@ -329,6 +330,168 @@ export function isLandsdNullTexel(r, g, b) {
   if (Math.abs(r - 128) <= 2 && Math.abs(g - 128) <= 2 && Math.abs(b - 128) <= 2) return true;
   if (Math.abs(r - 136) <= 4 && Math.abs(g - 138) <= 4 && Math.abs(b - 137) <= 4) return true;
   return false;
+}
+
+// Gutter for mip filtering only. The 128 and 136 fills are the published null
+// charts. RGB(60, 60, 60) is the flat unused field on FME atlases whose mesh
+// UVs never leave the photographed strip (Bank of China Tower _001, measured
+// 2026-10-25). Near-black stays a photograph: a window is not padding, and
+// dropping it here would open the glass in the mip. Triangle omission still
+// uses isLandsdNullTexel, so this does not punch new holes.
+export function isLandsdAtlasGutter(r, g, b) {
+  if (Math.abs(r - 128) <= 2 && Math.abs(g - 128) <= 2 && Math.abs(b - 128) <= 2) return true;
+  if (Math.abs(r - 136) <= 4 && Math.abs(g - 138) <= 4 && Math.abs(b - 137) <= 4) return true;
+  if (Math.abs(r - 60) <= 2 && Math.abs(g - 60) <= 2 && Math.abs(b - 60) <= 2) return true;
+  return false;
+}
+
+// A chase primitive that uses one sub-rectangle of the atlas. Full-bleed
+// charts (both axes cover the image) and repeating charts (UVs outside the
+// image) are not crops: cropping those would either do nothing or cut a tile.
+export function landsdChartWrap(minU, minV, maxU, maxV) {
+  if (![minU, minV, maxU, maxV].every(Number.isFinite)) return 'clamp';
+  if (minU < -0.002 || minV < -0.002 || maxU > 1.002 || maxV > 1.002) return 'repeat';
+  return 'clamp';
+}
+
+export function landsdChartRect(minU, minV, maxU, maxV) {
+  if (landsdChartWrap(minU, minV, maxU, maxV) !== 'clamp') return null;
+  const u0 = Math.max(0, minU);
+  const v0 = Math.max(0, minV);
+  const u1 = Math.min(1, maxU);
+  const v1 = Math.min(1, maxV);
+  const du = u1 - u0;
+  const dv = v1 - v0;
+  if (!(du > 0.01 && dv > 0.01)) return null;
+  if (du >= 0.9 && dv >= 0.9) return null;
+  return { u0, v0, u1, v1 };
+}
+
+export function remapLandsdChartUv(u, v, rect) {
+  const du = rect.u1 - rect.u0;
+  const dv = rect.v1 - rect.v0;
+  if (!(du > 0) || !(dv > 0)) return [u, v];
+  let uu = (u - rect.u0) / du;
+  let vv = (v - rect.v0) / dv;
+  if (uu < 0) uu = 0;
+  else if (uu > 1) uu = 1;
+  if (vv < 0) vv = 0;
+  else if (vv > 1) vv = 1;
+  return [uu, vv];
+}
+
+// Pixel crop of a chart. v = 0 is the first file row, the same row flipY false
+// uploads, so y grows down the file with v.
+export function landsdChartPixels(rect, width, height) {
+  const w = width | 0;
+  const h = height | 0;
+  if (!(w > 0) || !(h > 0) || !rect) return null;
+  const x0 = Math.max(0, Math.min(w - 1, Math.floor(rect.u0 * w)));
+  const y0 = Math.max(0, Math.min(h - 1, Math.floor(rect.v0 * h)));
+  const x1 = Math.max(x0 + 1, Math.min(w, Math.ceil(rect.u1 * w)));
+  const y1 = Math.max(y0 + 1, Math.min(h, Math.ceil(rect.v1 * h)));
+  return { x0, y0, x1, y1, width: x1 - x0, height: y1 - y0 };
+}
+
+export function landsdGutterFraction(src, width, height, stride = 1) {
+  const step = Math.max(1, stride | 0);
+  let n = 0;
+  let g = 0;
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const i = (y * width + x) * 4;
+      n++;
+      if (isLandsdAtlasGutter(src[i], src[i + 1], src[i + 2])) g++;
+    }
+  }
+  return n ? g / n : 0;
+}
+
+// One mip down. Gutter texels do not enter the average, so a street-angle
+// sample of a chart stays the photograph instead of the flat fill beside it.
+// A block that is only gutter stays gutter.
+export function landsdGutterMip(src, width, height) {
+  const w = Math.max(1, width >> 1);
+  const h = Math.max(1, height >> 1);
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.min(height - 1, y * 2);
+    const y1 = Math.min(height - 1, y0 + 1);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.min(width - 1, x * 2);
+      const x1 = Math.min(width - 1, x0 + 1);
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let n = 0;
+      for (const yy of [y0, y1]) {
+        for (const xx of [x0, x1]) {
+          const i = (yy * width + xx) * 4;
+          const R = src[i];
+          const G = src[i + 1];
+          const B = src[i + 2];
+          if (isLandsdAtlasGutter(R, G, B)) continue;
+          r += R;
+          g += G;
+          b += B;
+          a += src[i + 3];
+          n++;
+        }
+      }
+      const o = (y * w + x) * 4;
+      if (!n) {
+        const i = (y0 * width + x0) * 4;
+        out[o] = src[i];
+        out[o + 1] = src[i + 1];
+        out[o + 2] = src[i + 2];
+        out[o + 3] = src[i + 3];
+      } else {
+        out[o] = Math.round(r / n);
+        out[o + 1] = Math.round(g / n);
+        out[o + 2] = Math.round(b / n);
+        out[o + 3] = Math.round(a / n);
+      }
+    }
+  }
+  return { data: out, width: w, height: h };
+}
+
+// Copy photograph texels one pixel into neighbouring gutter, `radius` times.
+// Interior texels are unchanged. The anisotropic kernel at a chart edge then
+// hits the photograph instead of the fill.
+export function landsdDilateGutter(src, width, height, radius = 2) {
+  let cur = new Uint8ClampedArray(src);
+  const passes = Math.max(0, radius | 0);
+  for (let p = 0; p < passes; p++) {
+    const next = new Uint8ClampedArray(cur);
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const o = (y * width + x) * 4;
+        if (!isLandsdAtlasGutter(cur[o], cur[o + 1], cur[o + 2])) continue;
+        let copied = false;
+        for (let dy = -1; dy <= 1 && !copied; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= height) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const xx = x + dx;
+            if (xx < 0 || xx >= width) continue;
+            const i = (yy * width + xx) * 4;
+            if (isLandsdAtlasGutter(cur[i], cur[i + 1], cur[i + 2])) continue;
+            next[o] = cur[i];
+            next[o + 1] = cur[i + 1];
+            next[o + 2] = cur[i + 2];
+            next[o + 3] = cur[i + 3];
+            copied = true;
+            break;
+          }
+        }
+      }
+    }
+    cur = next;
+  }
+  return cur;
 }
 
 // glTF v = 0 is the first row of the file (the top). flipY false uploads that
@@ -498,11 +661,18 @@ export function bakeGltfWorldTriangles(doc, buffers, sidewalk = ISLAND_BOUNDS.si
 
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
-  // Every native chase photograph, not only the 80 m disc. The second mip is
-  // what makes anisotropy legal. Stopping at that level keeps the GPU off the
-  // deeper atlas-fill mips. Off-look masses (maxEdge 2048) keep a full chain.
+  // Chase photographs pack to the UV chart and mip without the gutter.
+  // mipLevels is intentionally unset: a two-level stop is the grain. Off-look
+  // masses (maxEdge 2048) keep a downscaled chain and do not take this path.
   if (maxEdge === 0) {
-    return { maxEdge: 0, mipmaps: true, mipLevels: 2, anisotropy: 16, minFilter: 'mipmap' };
+    return {
+      maxEdge: 0,
+      mipmaps: true,
+      chartMips: true,
+      anisotropy: 16,
+      minFilter: 'mipmap',
+      wrap: 'clamp'
+    };
   }
   return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
 }

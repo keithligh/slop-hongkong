@@ -35,7 +35,15 @@ import {
   footprintOverlapRatio,
   gltfAlbedoSampler,
   gltfCoversFootprint,
-  hkGltfBoxContains
+  hkGltfBoxContains,
+  isLandsdAtlasGutter,
+  isLandsdNullTexel,
+  landsdChartPixels,
+  landsdChartRect,
+  landsdChartWrap,
+  landsdDilateGutter,
+  landsdGutterMip,
+  remapLandsdChartUv
 } from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 import { HK_BUS_SHELTER, hkShelterRoofPose, planHkStreetGround } from '../js/hk-pedestrian.js';
@@ -236,13 +244,15 @@ export function digit1FlankMeltGone() {
   return true;
 }
 
-function chaseTwoLevel(entry) {
+function chaseChart(entry) {
   const sampler = gltfAlbedoSampler(entry);
   return sampler.maxEdge === 0
     && sampler.mipmaps === true
-    && sampler.mipLevels === 2
+    && sampler.chartMips === true
     && sampler.anisotropy === 16
-    && sampler.minFilter === 'mipmap';
+    && sampler.minFilter === 'mipmap'
+    && sampler.wrap === 'clamp'
+    && sampler.mipLevels !== 2;
 }
 
 function lookPointBox(dist) {
@@ -254,24 +264,24 @@ function lookPointBox(dist) {
 }
 
 // Mid-far canyon charts on the Digit1 look. The photograph past 80 m is the
-// same two-level anisotropic sample as the near disc, not a full mip chain
-// and not the one-tap smear. The chartless Bank of China Tower plate is owned
-// by the LandsD shaft yield, not by widening this flank-chart punch. A low
-// centre sample past Henderson (tile_22_26) is not this bar.
+// same chart-packed anisotropic sample as the near disc. Off-look sheets stay
+// downscaled and do not take that path. The chartless Bank of China Tower
+// plate is owned by the LandsD shaft yield, not by widening this flank-chart
+// punch. A low centre sample past Henderson (tile_22_26) is not this bar.
 export function digit1FarFlankFidelity() {
-  if (!chaseTwoLevel(lookPointBox(96))) return false;
-  if (!chaseTwoLevel(lookPointBox(220))) return false;
-  if (!chaseTwoLevel(HENDERSON)) return false;
-  if (!chaseTwoLevel({ minX: 278, maxX: 316, minZ: 86, maxZ: 121 })) return false;
-  if (!chaseTwoLevel({ minX: 341, maxX: 384, minZ: 135, maxZ: 178 })) return false;
+  if (!chaseChart(lookPointBox(96))) return false;
+  if (!chaseChart(lookPointBox(220))) return false;
+  if (!chaseChart(HENDERSON)) return false;
+  if (!chaseChart({ minX: 278, maxX: 316, minZ: 86, maxZ: 121 })) return false;
+  if (!chaseChart({ minX: 341, maxX: 384, minZ: 135, maxZ: 178 })) return false;
   if (!(boxClosestDistance(CKC_CHART, HK_STREET_EYE) > 80)) return false;
-  if (!chaseTwoLevel(CKC_CHART)) return false;
+  if (!chaseChart(CKC_CHART)) return false;
   const at80 = gltfAlbedoSampler(lookPointBox(80));
-  if (at80.mipLevels !== 2 || at80.anisotropy !== 16) return false;
+  if (at80.chartMips !== true || at80.anisotropy !== 16 || at80.wrap !== 'clamp') return false;
   const offLook = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
-  if (offLook.maxEdge !== 2048 || offLook.mipLevels === 2) return false;
+  if (offLook.maxEdge !== 2048 || offLook.chartMips === true || offLook.mipLevels === 2) return false;
   const behind = gltfAlbedoSampler({ minX: -220, maxX: -160, minZ: 0, maxZ: 50 });
-  if (behind.maxEdge !== 2048 || behind.mipLevels === 2) return false;
+  if (behind.maxEdge !== 2048 || behind.chartMips === true || behind.mipLevels === 2) return false;
   const tower = BLOCKS.find((block) => block.name === 'Bank of China Tower' && block.height === 303.3);
   if (!tower) return false;
   const charts = [BOC_CHART, CKC_CHART, HENDERSON, SOUTH_WALL];
@@ -531,7 +541,8 @@ export function digit1PhotoFidelity(sources) {
     if (inside) return false;
   }
   const sampler = gltfAlbedoSampler(HK_BOC_PHOTO_CHART);
-  if (sampler.mipLevels !== 2 || sampler.anisotropy !== 16 || sampler.maxEdge !== 0) return false;
+  if (sampler.chartMips !== true || sampler.anisotropy !== 16 || sampler.maxEdge !== 0) return false;
+  if (sampler.wrap !== 'clamp' || sampler.mipLevels === 2) return false;
   const stray = { id: 'stray', minX: 10, maxX: 30, minZ: 10, maxZ: 30, span: 20 };
   const kept = filterPinSheetBuildings([stray, HK_BOC_PHOTO_CHART]);
   if (kept.length !== 1 || kept[0].id !== HK_BOC_PHOTO_CHART.id) return false;
@@ -595,6 +606,88 @@ export function digit1MidbandPhotoFidelity(sources) {
   return false;
 }
 
+// Measured 2026-10-25 from the Open3Dhk zips. Bank of China Tower material
+// _001 on 11-SW-14A uses the left strip of a 4096² atlas. Bank of China
+// Building material _002 on 11-SW-9C uses the left half. The repeating crown
+// primitive on the tower is outside the image and must not be cropped.
+const BOC_TOWER_CHART_UV = Object.freeze({
+  minU: 0.0005000000237487257,
+  minV: 0,
+  maxU: 0.12449999898672104,
+  maxV: 0.4932631254196167
+});
+const BOC_FLANK_CHART_UV = Object.freeze({
+  minU: 0,
+  minV: 0,
+  maxU: 0.5,
+  maxV: 0.9488099813461304
+});
+const BOC_REPEAT_UV = Object.freeze({
+  minU: -4.069892406463623,
+  minV: 0,
+  maxU: 5.799892425537109,
+  maxV: 1.000030517578125
+});
+
+// Primary bar. Chase photographs are cropped to the UV chart they use, clamped,
+// and mip-filtered without averaging LandsD gutter into the facade. The
+// mid-band BUILDING hunt stays an open residual and is not this bar.
+export function digit1PhotoAtlasFidelity(sources) {
+  const sampler = gltfAlbedoSampler(HK_BOC_PHOTO_CHART);
+  if (sampler.chartMips !== true || sampler.wrap !== 'clamp' || sampler.anisotropy !== 16) return false;
+  if (sampler.maxEdge !== 0 || sampler.mipLevels === 2 || sampler.minFilter !== 'mipmap') return false;
+  const tower = landsdChartRect(
+    BOC_TOWER_CHART_UV.minU,
+    BOC_TOWER_CHART_UV.minV,
+    BOC_TOWER_CHART_UV.maxU,
+    BOC_TOWER_CHART_UV.maxV
+  );
+  if (!tower || !(tower.u1 - tower.u0 < 0.2) || !(tower.v1 - tower.v0 < 0.6)) return false;
+  const flank = landsdChartRect(
+    BOC_FLANK_CHART_UV.minU,
+    BOC_FLANK_CHART_UV.minV,
+    BOC_FLANK_CHART_UV.maxU,
+    BOC_FLANK_CHART_UV.maxV
+  );
+  if (!flank || !(flank.u1 - flank.u0 <= 0.5)) return false;
+  if (landsdChartRect(0, 0, 1, 1) !== null) return false;
+  if (landsdChartWrap(BOC_REPEAT_UV.minU, BOC_REPEAT_UV.minV, BOC_REPEAT_UV.maxU, BOC_REPEAT_UV.maxV) !== 'repeat') return false;
+  if (landsdChartRect(BOC_REPEAT_UV.minU, BOC_REPEAT_UV.minV, BOC_REPEAT_UV.maxU, BOC_REPEAT_UV.maxV) !== null) return false;
+  const [u0, v0] = remapLandsdChartUv(BOC_TOWER_CHART_UV.minU, BOC_TOWER_CHART_UV.minV, tower);
+  const [u1, v1] = remapLandsdChartUv(BOC_TOWER_CHART_UV.maxU, BOC_TOWER_CHART_UV.maxV, tower);
+  if (u0 !== 0 || v0 !== 0 || u1 !== 1 || v1 !== 1) return false;
+  const px = landsdChartPixels(tower, 4096, 4096);
+  if (!px || px.width > 600 || px.width < 400 || px.height > 2200 || px.height < 1800) return false;
+  if (isLandsdAtlasGutter(60, 60, 60) !== true) return false;
+  if (isLandsdNullTexel(60, 60, 60) !== false) return false;
+  if (isLandsdAtlasGutter(0, 0, 0) !== false) return false;
+  const src = new Uint8Array([
+    200, 30, 20, 255, 60, 60, 60, 255,
+    180, 40, 25, 255, 136, 138, 137, 255
+  ]);
+  const mip = landsdGutterMip(src, 2, 2);
+  if (mip.width !== 1 || mip.height !== 1) return false;
+  if (mip.data[0] !== 190 || mip.data[1] !== 35 || mip.data[2] !== 23) return false;
+  const shore = new Uint8Array([
+    10, 20, 30, 255, 60, 60, 60, 255
+  ]);
+  const dilated = landsdDilateGutter(shore, 2, 1, 1);
+  if (dilated[0] !== 10 || dilated[4] !== 10 || dilated[5] !== 20 || dilated[6] !== 30) return false;
+  const page = sources?.gltfPage || '';
+  if (!/export function packLandsdChart/.test(page)) return false;
+  if (!/landsdGutterMip/.test(page) || !/ClampToEdgeWrapping/.test(page)) return false;
+  if (!/chartMips/.test(page) || !/packLandsdChart\(geo, obj\.material, sampler\)/.test(page)) return false;
+  const frame = sources?.gltf || '';
+  if (!/export function landsdChartRect/.test(frame)) return false;
+  if (!/export function isLandsdAtlasGutter/.test(frame)) return false;
+  if (!/chartMips: true/.test(frame)) return false;
+  const fetchSrc = sources?.fetch || '';
+  if (!/11-SW-14A/.test(fetchSrc)) return false;
+  if (/mapillary/i.test(page)) return false;
+  if (HK_MIDBAND_PHOTO_CHARTS.length !== 0) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -651,6 +744,7 @@ export function digit1InvaderGate(root) {
     digit1MidbandCanyonFidelity: digit1MidbandCanyonFidelity(sources),
     digit1MidbandFacadeFidelity: digit1MidbandFacadeFidelity(sources),
     digit1PhotoFidelity: digit1PhotoFidelity(sources),
+    digit1PhotoAtlasFidelity: digit1PhotoAtlasFidelity(sources),
     digit1MidbandPhotoFidelity: digit1MidbandPhotoFidelity(sources)
   };
   // #22–#35 holds. The mid-band photograph is an open residual until a BUILDING
@@ -672,6 +766,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1MidbandCanyonFidelity === true
     && bars.digit1MidbandFacadeFidelity === true
     && bars.digit1PhotoFidelity === true
+    && bars.digit1PhotoAtlasFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   const openResiduals = [];
   if (bars.digit1MidbandPhotoFidelity !== true) openResiduals.push('digit1MidbandPhotoFidelity');

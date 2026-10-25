@@ -27,9 +27,16 @@ import {
   gltfStreetPhoto,
   gltfTextureMaxEdge,
   hiddenExtrudeIds,
+  isLandsdAtlasGutter,
   isLandsdNullTexel,
   landsdAlbedoRow,
+  landsdChartPixels,
+  landsdChartRect,
+  landsdChartWrap,
+  landsdDilateGutter,
+  landsdGutterMip,
   landsdNullFillTriangles,
+  remapLandsdChartUv,
   NULL_FILL_EDGE,
   nullFillSampleSize,
   hk80GridToHk80Geog,
@@ -218,8 +225,10 @@ test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
   assert.match(gltfJs, /generateMipmaps = false/);
   assert.match(gltfJs, /LinearFilter/);
   assert.match(gltfJs, /metalness = 0/);
-  assert.match(gltfJs, /uploadNearFacadeMips/);
-  assert.match(gltfJs, /mipLevels === 2/);
+  assert.match(gltfJs, /packLandsdChart/);
+  assert.match(gltfJs, /landsdGutterMip/);
+  assert.match(gltfJs, /ClampToEdgeWrapping/);
+  assert.match(gltfJs, /chartMips/);
   assert.match(gltfJs, /clampLandsdAnisotropy\(sampler\.anisotropy/);
   assert.match(main, /setLandsdAnisotropyLimit/);
   assert.match(main, /landsdAniso/);
@@ -298,7 +307,7 @@ test('null-fill samples a 4096 atlas at 1024 so a chart-grey edge stays a chart'
   assert.doesNotMatch(gltfJs, /NULL_FILL_EDGE = 256/);
 });
 
-test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets stay downscaled', () => {
+test('Des Voeux chase photographs pack the chart past 80 m, and off-look sheets stay downscaled', () => {
   const plan = planGltfManifest({
     sheet: '11-SW-9C',
     buildings: [
@@ -314,7 +323,9 @@ test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets s
   const nearPhoto = gltfAlbedoSampler({ minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1 });
   assert.equal(nearPhoto.maxEdge, 0);
   assert.equal(nearPhoto.mipmaps, true);
-  assert.equal(nearPhoto.mipLevels, 2);
+  assert.equal(nearPhoto.chartMips, true);
+  assert.equal(nearPhoto.wrap, 'clamp');
+  assert.equal(nearPhoto.mipLevels, undefined);
   assert.equal(nearPhoto.anisotropy, 16);
   assert.equal(nearPhoto.minFilter, 'mipmap');
   assert.equal(clampLandsdAnisotropy(16, 16), 16);
@@ -327,21 +338,25 @@ test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets s
     return { minX: x, maxX: x, minZ: z, maxZ: z };
   };
   const at80 = gltfAlbedoSampler(pointBox(80));
-  assert.equal(at80.mipLevels, 2);
+  assert.equal(at80.chartMips, true);
+  assert.equal(at80.wrap, 'clamp');
   assert.equal(at80.anisotropy, 16);
   const past80 = gltfAlbedoSampler(pointBox(96));
   assert.equal(gltfInStreetChase(pointBox(96)), true);
   assert.equal(past80.maxEdge, 0);
   assert.equal(past80.mipmaps, true);
-  assert.equal(past80.mipLevels, 2);
+  assert.equal(past80.chartMips, true);
+  assert.equal(past80.mipLevels, undefined);
   assert.equal(past80.anisotropy, 16);
   assert.equal(past80.minFilter, 'mipmap');
   const midFar = gltfAlbedoSampler(pointBox(220));
-  assert.equal(midFar.mipLevels, 2);
+  assert.equal(midFar.chartMips, true);
+  assert.equal(midFar.wrap, 'clamp');
   assert.equal(midFar.anisotropy, 16);
   const farPhoto = gltfAlbedoSampler({ minX: 400, maxX: 430, minZ: 20, maxZ: 40 });
   assert.equal(farPhoto.maxEdge, 2048);
   assert.equal(farPhoto.mipmaps, true);
+  assert.equal(farPhoto.chartMips, undefined);
   assert.equal(farPhoto.mipLevels, undefined);
   assert.equal(farPhoto.anisotropy, 16);
   assert.equal(farPhoto.minFilter, 'mipmap');
@@ -353,17 +368,19 @@ test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets s
   assert.equal(gltfTextureMaxEdge(henderson), 0);
   assert.equal(hendersonPhoto.maxEdge, 0);
   assert.equal(hendersonPhoto.mipmaps, true);
-  assert.equal(hendersonPhoto.mipLevels, 2);
+  assert.equal(hendersonPhoto.chartMips, true);
+  assert.equal(hendersonPhoto.wrap, 'clamp');
+  assert.equal(hendersonPhoto.mipLevels, undefined);
   assert.equal(hendersonPhoto.anisotropy, 16);
   assert.equal(hendersonPhoto.minFilter, 'mipmap');
   const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
   const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
   assert.equal(gltfAlbedoSampler(fairmont).mipmaps, true);
-  assert.equal(gltfAlbedoSampler(fairmont).mipLevels, 2);
+  assert.equal(gltfAlbedoSampler(fairmont).chartMips, true);
   assert.equal(gltfAlbedoSampler(fairmont).minFilter, 'mipmap');
   assert.equal(gltfAlbedoSampler(fairmont).anisotropy, 16);
   assert.equal(gltfAlbedoSampler(lippo).mipmaps, true);
-  assert.equal(gltfAlbedoSampler(lippo).mipLevels, 2);
+  assert.equal(gltfAlbedoSampler(lippo).chartMips, true);
   const behind = { minX: -220, maxX: -160, minZ: 0, maxZ: 50 };
   assert.equal(gltfInStreetChase(behind), false);
   assert.equal(gltfAlbedoSampler(behind).mipmaps, true);
@@ -371,6 +388,42 @@ test('Des Voeux chase photographs take two mips past 80 m, and off-look sheets s
   assert.equal(gltfAlbedoSampler(behind).maxEdge, 2048);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);
+});
+
+test('a LandsD sub-rectangle chart crops, and a gutter mip keeps the photograph', () => {
+  const tower = landsdChartRect(0.0005000000237487257, 0, 0.12449999898672104, 0.4932631254196167);
+  assert.ok(tower);
+  assert.ok(tower.u1 - tower.u0 < 0.2);
+  const flank = landsdChartRect(0, 0, 0.5, 0.9488099813461304);
+  assert.ok(flank);
+  assert.equal(flank.u1, 0.5);
+  assert.equal(landsdChartRect(0, 0, 1, 1), null);
+  assert.equal(landsdChartWrap(-4.07, 0, 5.8, 1), 'repeat');
+  assert.equal(landsdChartRect(-4.07, 0, 5.8, 1), null);
+  const [u0, v0] = remapLandsdChartUv(tower.u0, tower.v0, tower);
+  const [u1, v1] = remapLandsdChartUv(tower.u1, tower.v1, tower);
+  assert.deepEqual([u0, v0, u1, v1], [0, 0, 1, 1]);
+  const px = landsdChartPixels(tower, 4096, 4096);
+  assert.ok(px.width > 400 && px.width < 600);
+  assert.ok(px.height > 1800 && px.height < 2200);
+  assert.equal(isLandsdAtlasGutter(60, 60, 60), true);
+  assert.equal(isLandsdNullTexel(60, 60, 60), false);
+  assert.equal(isLandsdAtlasGutter(0, 0, 0), false);
+  assert.equal(isLandsdAtlasGutter(90, 82, 64), false);
+  const src = new Uint8Array([
+    200, 30, 20, 255, 60, 60, 60, 255,
+    180, 40, 25, 255, 136, 138, 137, 255
+  ]);
+  const mip = landsdGutterMip(src, 2, 2);
+  assert.equal(mip.width, 1);
+  assert.equal(mip.height, 1);
+  assert.equal(mip.data[0], 190);
+  assert.equal(mip.data[1], 35);
+  assert.equal(mip.data[2], 23);
+  const shore = landsdDilateGutter(new Uint8Array([10, 20, 30, 255, 60, 60, 60, 255]), 2, 1, 1);
+  assert.equal(shore[4], 10);
+  assert.equal(shore[5], 20);
+  assert.equal(shore[0], 10);
 });
 
 test('a baked LandsD triangle sits on the sidewalk and the boot passes it to the look ray', () => {
@@ -458,7 +511,9 @@ test('the 11-SW-14A pin sheet keeps the Bank of China photograph and drops a str
   const kept = filterPinSheetBuildings([stray, HK_BOC_PHOTO_CHART]);
   assert.deepEqual(kept.map((entry) => entry.id), [HK_BOC_PHOTO_CHART.id]);
   const sampler = gltfAlbedoSampler(HK_BOC_PHOTO_CHART);
-  assert.equal(sampler.mipLevels, 2);
+  assert.equal(sampler.chartMips, true);
+  assert.equal(sampler.wrap, 'clamp');
+  assert.equal(sampler.mipLevels, undefined);
   assert.equal(sampler.anisotropy, 16);
   assert.equal(sampler.maxEdge, 0);
   for (const hit of [{ x: 84.93, z: 77.32 }, { x: 80.89, z: 71.08 }, { x: 141.18, z: 44.13 }]) {
