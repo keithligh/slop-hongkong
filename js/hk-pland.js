@@ -3,9 +3,11 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BLOCKS } from './city-config.js';
 import {
   PLAND_PAGE_TEX_EDGE,
+  desVoeuxCarriageSegments,
   formatPlandLog,
   planPlandManifest,
   plandLocalToWorld,
+  plandOmitsCarriageShell,
   plandYieldsToLandsd,
   resolvePlandRequest,
   withPlandCorridorHidden
@@ -106,20 +108,24 @@ function finishBaked(geo) {
   return geo;
 }
 
-// Donor only. A triangle whose centre sits on the street side of a loaded
-// LandsD box is the 2017 shell in front of that photograph. Compare keeps it.
-function trimPlandInFrontOfLandsd(geo, boxes) {
-  if (!geo) return { geo: null, dropped: 0 };
-  if (!boxes?.length) return { geo: finishBaked(geo), dropped: 0 };
+// LandsD skirt is donor only: a triangle whose centre sits on the street side
+// of a loaded box is the 2017 shell in front of that photograph. Compare keeps
+// that skirt off. The carriageway shell is both modes. It is the low aerial
+// triangles on Des Voeux that the 1.2 m carpet test kept.
+function trimPlandInFrontOfLandsd(geo, boxes, segments) {
+  const roads = segments || [];
+  if (!geo) return { geo: null, landsd: 0, shell: 0 };
+  if (!boxes?.length && !roads.length) return { geo: finishBaked(geo), landsd: 0, shell: 0 };
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
   const index = geo.getIndex();
-  if (!pos) return { geo: null, dropped: 0 };
+  if (!pos) return { geo: null, landsd: 0, shell: 0 };
   const triCount = index ? Math.floor(index.count / 3) : Math.floor(pos.count / 3);
   const keptPos = new Float32Array(triCount * 9);
   const keptUv = uv ? new Float32Array(triCount * 6) : null;
   let written = 0;
-  let dropped = 0;
+  let landsd = 0;
+  let shell = 0;
   const corner = (slot) => {
     const vi = index ? index.getX(slot) : slot;
     return [pos.getX(vi), pos.getY(vi), pos.getZ(vi), uv ? uv.getX(vi) : 0, uv ? uv.getY(vi) : 0];
@@ -133,8 +139,17 @@ function trimPlandInFrontOfLandsd(geo, boxes) {
       y: (a[1] + b[1] + c[1]) / 3,
       z: (a[2] + b[2] + c[2]) / 3
     };
-    if (plandYieldsToLandsd(mid, boxes)) {
-      dropped++;
+    if (boxes?.length && plandYieldsToLandsd(mid, boxes)) {
+      landsd++;
+      continue;
+    }
+    if (plandOmitsCarriageShell(
+      { x: a[0], y: a[1], z: a[2] },
+      { x: b[0], y: b[1], z: b[2] },
+      { x: c[0], y: c[1], z: c[2] },
+      roads
+    )) {
+      shell++;
       continue;
     }
     const p = written * 9;
@@ -159,11 +174,11 @@ function trimPlandInFrontOfLandsd(geo, boxes) {
     written++;
   }
   geo.dispose();
-  if (!written) return { geo: null, dropped };
+  if (!written) return { geo: null, landsd, shell };
   const next = new THREE.BufferGeometry();
   next.setAttribute('position', new THREE.BufferAttribute(keptPos.slice(0, written * 9), 3));
   if (keptUv) next.setAttribute('uv', new THREE.BufferAttribute(keptUv.slice(0, written * 6), 2));
-  return { geo: finishBaked(next), dropped, kept: written };
+  return { geo: finishBaked(next), landsd, shell, kept: written };
 }
 
 export function hidePlandCorridorExtrudes(gltfPlan) {
@@ -204,8 +219,10 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   let failed = 0;
   let triangles = 0;
   let yielded = 0;
+  let shell = 0;
   const donor = donorOffset(plan.mode);
   const boxes = donor ? landsdBoxes : [];
+  const segments = desVoeuxCarriageSegments();
   for (const tile of plan.tiles) {
     try {
       const gltf = await loader.loadAsync(`./hk-3d/pland/${tile.gltf}`);
@@ -214,8 +231,9 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
         if (!obj.isMesh) return;
         const baked = bakeGeometry(obj.geometry, tile.modelTransform, plan.streetHkpd, plan.sidewalk);
         if (!baked) return;
-        const trimmed = trimPlandInFrontOfLandsd(baked, boxes);
-        yielded += trimmed.dropped;
+        const trimmed = trimPlandInFrontOfLandsd(baked, boxes, segments);
+        yielded += trimmed.landsd;
+        shell += trimmed.shell;
         const geo = trimmed.geo;
         if (!geo) return;
         const mesh = new THREE.Mesh(geo, showPhoto(obj.material, plan.mode));
@@ -241,5 +259,6 @@ export async function mountPlandCorridor(scene, plan, landsdBoxes = []) {
   if (group.children.length) scene.add(group);
   console.info(formatPlandLog({ ...plan, triangles }));
   if (yielded) console.info(`[pland] omitted ${yielded} triangles on the street side of a LandsD box`);
-  return { loaded, failed, triangles, yielded, group };
+  if (shell) console.info(`[pland] omitted ${shell} low triangles on the Des Voeux carriageway`);
+  return { loaded, failed, triangles, yielded, shell, group };
 }

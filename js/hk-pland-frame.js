@@ -8,6 +8,7 @@ import {
   hkCoreUnproject,
   hkFootprintHeight
 } from './city-config.js';
+import { GEO } from './geo-source.js';
 import { gltfInStreetChase, hk80GridToWgs84, hk80ToWorld } from './hk-gltf-frame.js';
 
 // PlanD 3D Photo-realistic Model (規劃署). OBJ tiles are Altizure exports:
@@ -34,6 +35,12 @@ export const PLAND_CAPTURE = 'Hong Kong Island aerial photographs, March 2017; t
 // Metres above the sidewalk. Triangles entirely below this are the road carpet.
 // A facade that still touches the pavement is kept, because the test is the highest corner.
 export const PLAND_GROUND_CLEARANCE = 1.2;
+// World y. The carriageway shell at the Des Voeux eye is triangles the 1.2 m
+// test keeps because one corner clears it, with the high corner still below this.
+// A face that rises through it stays. The sidewalk is 0.22 m, so this is about 4.3 m up.
+export const PLAND_STREET_SHELL_TOP = 4.5;
+// Metres outside the tagged half-width. Covers the granite kerb without the lot face.
+export const PLAND_STREET_SHELL_APRON = 0.75;
 // Vertices inside this radius of the Des Voeux eye set the HKPD of the pavement.
 // The OBJ also contains heights down to about −188 m. Snapping that minimum
 // to the sidewalk would lift the street into the sky.
@@ -475,6 +482,86 @@ export function clipPlandObjText(text, options) {
   const clipper = createPlandObjClipper(options);
   for (const line of String(text).split(/\r?\n/)) clipper.pushLine(line);
   return clipper.finish();
+}
+
+export function desVoeuxCarriageSegments(graph = GEO.roadGraph) {
+  const nodes = graph?.nodes;
+  const links = graph?.links;
+  if (!nodes || !links || !graph.names) return [];
+  const out = [];
+  for (const link of links) {
+    const [a, b, nameIndex, width, , , inner] = link;
+    if (graph.names[nameIndex] !== 'DES VOEUX ROAD CENTRAL') continue;
+    const carriage = Number(width);
+    if (!(carriage >= 3)) continue;
+    const ax0 = nodes[a * 2];
+    const az0 = nodes[a * 2 + 1];
+    const bx1 = nodes[b * 2];
+    const bz1 = nodes[b * 2 + 1];
+    const pts = [[ax0, az0]];
+    const mids = inner || [];
+    for (let k = 0; k + 1 < mids.length; k += 2) pts.push([mids[k], mids[k + 1]]);
+    pts.push([bx1, bz1]);
+    const half = carriage * 0.5;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const ax = pts[i][0];
+      const az = pts[i][1];
+      const bx = pts[i + 1][0];
+      const bz = pts[i + 1][1];
+      if (![ax, az, bx, bz].every(Number.isFinite)) continue;
+      if (Math.hypot(bx - ax, bz - az) < 0.05) continue;
+      out.push({ ax, az, bx, bz, half });
+    }
+  }
+  return out;
+}
+
+export function plandCarriageDistance(x, z, segments) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
+  let best = null;
+  for (const seg of segments || []) {
+    const abx = seg.bx - seg.ax;
+    const abz = seg.bz - seg.az;
+    const len2 = abx * abx + abz * abz;
+    const t = len2 > 1e-8 ? Math.max(0, Math.min(1, ((x - seg.ax) * abx + (z - seg.az) * abz) / len2)) : 0;
+    const dist = Math.hypot(x - (seg.ax + abx * t), z - (seg.az + abz * t));
+    if (!best || dist < best.dist) best = { dist, half: seg.half };
+  }
+  return best;
+}
+
+function pointOnCarriageway(x, z, segments, apron) {
+  for (const seg of segments) {
+    const abx = seg.bx - seg.ax;
+    const abz = seg.bz - seg.az;
+    const len2 = abx * abx + abz * abz;
+    const t = len2 > 1e-8 ? Math.max(0, Math.min(1, ((x - seg.ax) * abx + (z - seg.az) * abz) / len2)) : 0;
+    const dist = Math.hypot(x - (seg.ax + abx * t), z - (seg.az + abz * t));
+    if (dist <= seg.half + apron) return true;
+  }
+  return false;
+}
+
+// Mount-time. The fetch clip keeps a triangle when any corner clears the 1.2 m
+// carpet, so an aerial triangle on the asphalt whose high corner is a few metres
+// up stays in the glTF. At the Des Voeux eye that is the ripped shell on the
+// south kerb. A corner on the carriageway, below the shell top, is dropped.
+// A lot face off the carriageway stays, and so does anything tall enough to be a facade.
+export function plandOmitsCarriageShell(a, b, c, segments, {
+  top = PLAND_STREET_SHELL_TOP,
+  apron = PLAND_STREET_SHELL_APRON
+} = {}) {
+  if (!segments?.length || !a || !b || !c) return false;
+  const maxY = Math.max(a.y, b.y, c.y);
+  if (!(Number.isFinite(maxY) && maxY < top)) return false;
+  const points = [a, b, c, {
+    x: (a.x + b.x + c.x) / 3,
+    z: (a.z + b.z + c.z) / 3
+  }];
+  for (const point of points) {
+    if (pointOnCarriageway(point.x, point.z, segments, apron)) return true;
+  }
+  return false;
 }
 
 export function plandYieldsToLandsd(point, boxes, {

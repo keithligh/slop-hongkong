@@ -11,6 +11,11 @@ import {
   PLAND_LANDSD_SKIRT,
   PLAND_PAGE_TEX_EDGE,
   plandYieldsToLandsd,
+  PLAND_STREET_SHELL_APRON,
+  PLAND_STREET_SHELL_TOP,
+  desVoeuxCarriageSegments,
+  plandCarriageDistance,
+  plandOmitsCarriageShell,
   PLAND_DIGIT1_CAMERAS,
   PLAND_TILE_21_26_SAMPLE,
   PLAND_TILE_21_26_TRANSFORM,
@@ -226,6 +231,54 @@ test('Digit1 cameras are the person chase, and a corridor extrude is hidden only
   assert.ok(merged.hiddenIds.has(7));
   const mtl = parsePlandMtl('newmtl mat_tex_0\nKd 1 1 1\nmap_Kd level_5_0_0_tex_0.jpg\n');
   assert.equal(mtl.mat_tex_0, 'level_5_0_0_tex_0.jpg');
+});
+
+test('PlanD drops the low Des Voeux carriageway shell and keeps a lot face', () => {
+  const segments = desVoeuxCarriageSegments();
+  assert.ok(segments.length > 8);
+  assert.equal(PLAND_STREET_SHELL_TOP, 4.5);
+  assert.equal(PLAND_STREET_SHELL_APRON, 0.75);
+  const eyeRoad = plandCarriageDistance(HK_STREET_EYE.x, HK_STREET_EYE.z, segments);
+  assert.ok(eyeRoad.dist < 0.5, eyeRoad.dist);
+  assert.ok(Math.abs(eyeRoad.half - 3.3) < 0.05, eyeRoad.half);
+  assert.equal(plandOmitsCarriageShell(
+    { x: HK_STREET_EYE.x, y: 1.4, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x + 0.8, y: 2.6, z: HK_STREET_EYE.z + 0.2 },
+    { x: HK_STREET_EYE.x + 0.2, y: 3.1, z: HK_STREET_EYE.z + 0.7 },
+    segments
+  ), true);
+  assert.equal(plandOmitsCarriageShell(
+    { x: HK_STREET_EYE.x, y: 2, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x + 0.8, y: 12, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x, y: 6, z: HK_STREET_EYE.z + 0.8 },
+    segments
+  ), false);
+  const rx = -Math.cos(HK_STREET_EYE.heading);
+  const rz = Math.sin(HK_STREET_EYE.heading);
+  const lot = { x: HK_STREET_EYE.x + rx * 8, z: HK_STREET_EYE.z + rz * 8 };
+  const lotRoad = plandCarriageDistance(lot.x, lot.z, segments);
+  assert.ok(lotRoad.dist > eyeRoad.half + PLAND_STREET_SHELL_APRON + 2, lotRoad.dist);
+  assert.equal(plandOmitsCarriageShell(
+    { x: lot.x, y: 1.5, z: lot.z },
+    { x: lot.x + 1, y: 3.2, z: lot.z },
+    { x: lot.x, y: 2.4, z: lot.z + 1 },
+    segments
+  ), false);
+  assert.equal(plandOmitsCarriageShell(
+    { x: HK_STREET_EYE.x, y: 1.4, z: HK_STREET_EYE.z },
+    { x: lot.x, y: 3.0, z: lot.z },
+    { x: lot.x + 1, y: 2.2, z: lot.z },
+    segments
+  ), true);
+  assert.equal(plandOmitsCarriageShell(
+    { x: HK_STREET_EYE.x, y: 1.4, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x + 1, y: 2, z: HK_STREET_EYE.z },
+    { x: HK_STREET_EYE.x, y: 2, z: HK_STREET_EYE.z + 1 },
+    []
+  ), false);
+  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
+  assert.match(page, /plandOmitsCarriageShell/);
+  assert.match(page, /desVoeuxCarriageSegments/);
 });
 
 test('PlanD yields on the street side of Henderson and keeps the mid-street photo point', () => {
