@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS } from './city-config.js';
 import {
+  DIGIT1_FAR_CHASE,
   bakeGltfWorldTriangles,
   boxClosestDistance,
   formatGltfLog,
@@ -9,6 +10,8 @@ import {
   gltfAlbedoSampler,
   filterPinSheetBuildings,
   gltfInStreetChase,
+  landsdFarChaseMesh,
+  landsdSealFarNullTriangles,
   hiddenExtrudeIds,
   hk80ToWorld,
   isGltfPinSheet,
@@ -602,6 +605,93 @@ function omitLandsdNullFill(geo, material) {
   return dropped;
 }
 
+function attributeComponent(attr, index, component) {
+  switch (component) {
+    case 0: return attr.getX(index);
+    case 1: return attr.getY(index);
+    case 2: return attr.getZ(index);
+    case 3: return attr.getW(index);
+    default: {
+      const unknown = component;
+      throw new Error(`gltf attribute component ${unknown}`);
+    }
+  }
+}
+
+function applyFarSeal(geo, sealed) {
+  const names = Object.keys(geo.attributes);
+  const rows = sealed.copies.map((copy) => {
+    const attrs = {};
+    for (const name of names) {
+      const attr = geo.getAttribute(name);
+      const item = new Array(attr.itemSize);
+      for (let k = 0; k < attr.itemSize; k++) item[k] = attributeComponent(attr, copy.from, k);
+      if (name === 'uv') {
+        item[0] = copy.u;
+        item[1] = copy.v;
+      }
+      attrs[name] = item;
+    }
+    return attrs;
+  });
+  const base = geo.getAttribute('position').count;
+  for (const name of names) {
+    const attr = geo.getAttribute(name);
+    const item = attr.itemSize;
+    const dst = new Float32Array((base + rows.length) * item);
+    for (let i = 0; i < base; i++) {
+      for (let k = 0; k < item; k++) dst[i * item + k] = attributeComponent(attr, i, k);
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const src = rows[i][name];
+      for (let k = 0; k < item; k++) dst[(base + i) * item + k] = src[k];
+    }
+    geo.setAttribute(name, new THREE.BufferAttribute(dst, item, attr.normalized));
+  }
+  geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(sealed.index), 1));
+  geo.clearGroups();
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+}
+
+// Far chase only. A null triangle stays in the mesh and samples the nearest
+// photograph UV, so the Digit1 eye does not see the 2017 aerial through that
+// hole. A chart with no photograph still drops. Near meshes keep the omit.
+function sealLandsdFarNullFill(geo, material) {
+  const map = albedoMap(material);
+  const uv = geo.getAttribute('uv');
+  const pos = geo.getAttribute('position');
+  if (!map || !uv || !pos) return { sealed: 0, dropped: 0 };
+  const src = triangleIndex(geo);
+  const sampleVertex = (vertex) => {
+    if (vertex < 0 || vertex >= uv.count) return null;
+    return sampleAlbedoTexel(map, uv.getX(vertex), uv.getY(vertex));
+  };
+  const sampleCentroid = (a, b, c) => {
+    if (a < 0 || b < 0 || c < 0 || a >= uv.count || b >= uv.count || c >= uv.count) return null;
+    const u = (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3;
+    const v = (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3;
+    return sampleAlbedoTexel(map, u, v);
+  };
+  const readUv = (vertex) => {
+    if (vertex < 0 || vertex >= uv.count) return null;
+    return [uv.getX(vertex), uv.getY(vertex)];
+  };
+  const sealed = landsdSealFarNullTriangles(src, sampleVertex, sampleCentroid, readUv, pos.count);
+  if (!sealed.copies.length) {
+    if (!sealed.dropped) return { sealed: 0, dropped: 0 };
+    if (!sealed.index.length) {
+      geo.setDrawRange(0, 0);
+      return { sealed: 0, dropped: sealed.dropped };
+    }
+    geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(sealed.index), 1));
+    geo.clearGroups();
+    return { sealed: 0, dropped: sealed.dropped };
+  }
+  applyFarSeal(geo, sealed);
+  return { sealed: sealed.sealed, dropped: sealed.dropped };
+}
+
 // The glTF material keeps its baseColor texture, UV set, and alpha. This only
 // corrects the sampler and the constant FME metal factor.
 export function sharpenPhoto(material, sampler) {
@@ -657,7 +747,7 @@ export function sharpenPhoto(material, sampler) {
 // Boxes inside this distance can already satisfy the 260 m look-ray test.
 // Farther chase meshes are baked so a real triangle past that cap can drop
 // glass without a hollow shell's box doing it.
-const LOOK_SOLID_PAST = 200;
+const LOOK_SOLID_PAST = DIGIT1_FAR_CHASE;
 
 async function fetchLookSolid(entry) {
   const res = await fetch(entry.url);
@@ -785,11 +875,20 @@ export async function mountHkGltfBuildings(scene, plan) {
       gltf.scene.updateMatrixWorld(true);
       let meshes = 0;
       let nullDropped = 0;
+      let farSealed = 0;
+      const farChase = landsdFarChaseMesh(entry);
       gltf.scene.traverse((obj) => {
         if (!obj.isMesh) return;
         const geo = bakeMesh(obj);
         if (!geo) return;
-        const dropped = omitLandsdNullFill(geo, obj.material);
+        let dropped = 0;
+        if (farChase) {
+          const seal = sealLandsdFarNullFill(geo, obj.material);
+          farSealed += seal.sealed;
+          dropped = seal.dropped;
+        } else {
+          dropped = omitLandsdNullFill(geo, obj.material);
+        }
         nullDropped += dropped;
         if (geo.drawRange.count === 0) {
           geo.dispose();
@@ -827,6 +926,7 @@ export async function mountHkGltfBuildings(scene, plan) {
           }
         }
       });
+      if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
       if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
       if (!meshes) throw new Error('no meshes');
       colliders.push({

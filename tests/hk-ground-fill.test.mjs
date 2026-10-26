@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { HK_CORE_WORLD, HK_RETAIL_BELT, HONG_KONG_ISLAND_COASTLINE, ROADS, BLOCKS, blockInHkCore, hkFootprintHeight } from '../js/city-config.js';
 import { digit1ChasePose } from '../js/digit1-probe-frame.js';
-import { canyonGlassWalls, clipCanyonWalls, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
+import { canyonGlassWalls, clipCanyonWalls, digit1EyeFrameHalf, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
 
 function contains(wall, x, z) {
   const dx = x - wall.obb.cx;
@@ -409,4 +409,32 @@ test('a triangle past the 260 m box cap drops look glass; the box alone does not
   assert.equal(canyonGlassWalls([wall], [], { eye, solids: [missed] }).length, 1);
   const retail = clipCanyonWalls([wall], [farBox], { eye, near: 80, sample: 4, minLen: 3.2 });
   assert.equal(retail.length, 1);
+});
+
+test('the Digit1 eye frame drops curtain outside the 72 m corridor when a loaded triangle is behind it', () => {
+  assert.equal(digit1EyeFrameHalf(8), 72);
+  assert.ok(digit1EyeFrameHalf(210) > 96);
+  assert.ok(digit1EyeFrameHalf(210) < 260);
+  const eye = digit1Eye;
+  const wall = lookWall(eye, 210, 96);
+  const pose = digit1ChasePose(eye);
+  const y = HK_RETAIL_BELT + 1.2;
+  const dx = wall.x - pose.cam.x;
+  const dy = y - pose.cam.y;
+  const dz = wall.z - pose.cam.z;
+  const dist = Math.hypot(dx, dy, dz);
+  const dir = { x: dx / dist, y: dy / dist, z: dz / dist };
+  const lippo = solidOnRay(pose.cam, dir, dist + 40);
+  assert.equal(canyonGlassWalls([wall], [], { eye, solids: [lippo], frameEye: false }).length, 1);
+  assert.equal(canyonGlassWalls([wall], [], { eye, solids: [lippo] }).length, 0);
+  assert.equal(canyonGlassWalls([wall], [], { eye }).length, 1);
+  const farBox = {
+    minX: pose.cam.x + dir.x * (dist + 40) - 8,
+    maxX: pose.cam.x + dir.x * (dist + 40) + 8,
+    minZ: pose.cam.z + dir.z * (dist + 40) - 8,
+    maxZ: pose.cam.z + dir.z * (dist + 40) + 8,
+    minH: 1,
+    maxH: 150
+  };
+  assert.equal(canyonGlassWalls([wall], [farBox], { eye }).length, 1);
 });

@@ -482,6 +482,21 @@ function tallMeshBehindCell(x, z, wall, boxes, behind) {
   return false;
 }
 
+// Digit1 chase camera, FOV 56 at 16:9. The 72 m corridor is narrower than that
+// frame past about 80 m, so a ribbon the eye still sees was keeping its curtain
+// in front of a loaded triangle. The corridor half stays the floor.
+export function digit1EyeFrameHalf(along, corridorHalf = 72, {
+  fov = 56,
+  aspect = 16 / 9,
+  camBack = 4.3
+} = {}) {
+  const tanH = Math.tan((fov * Math.PI) / 360) * aspect;
+  const depth = Math.max(0, Number.isFinite(along) ? along : 0) + camBack;
+  const framed = depth * tanH * 1.08;
+  const floor = Number.isFinite(corridorHalf) ? corridorHalf : 72;
+  return Math.max(floor, framed);
+}
+
 // The retail belt stays where no LandsD box occupies the curb. The curtain
 // above it does not. From the Des Voeux chase, a glass sample is omitted when
 // a loaded mesh is the facade that curtain stands in for:
@@ -490,7 +505,9 @@ function tallMeshBehindCell(x, z, wall, boxes, behind) {
 //   within the corridor reach (a hollow shell's box is not that hit), or
 // - a mesh that rises through the belt sits on the lot side of the cell,
 //   within `behind` metres of the outer face (the ray can miss that box).
-// A sample outside the look corridor, a short kiosk, or a far courtyard keeps
+// The side test is the wider of `half` and the Digit1 eye frame, so a loaded
+// triangle past ~200 m that the camera still frames drops the curtain. A sample
+// outside that frame, a short kiosk, or a far courtyard with no triangle keeps
 // its glass. Raising the 80 m disc is not this test: an empty curb just
 // outside that disc keeps its shopfront.
 export function canyonGlassWalls(walls, meshes, {
@@ -514,7 +531,9 @@ export function canyonGlassWalls(walls, meshes, {
   // Triangles of loaded meshes whose boxes start past `cover`. The box test
   // stops at 260 m so a hollow courtyard shell cannot delete the curtain.
   // A real triangle further down the same ray still can, out to the corridor.
-  solids = null
+  solids = null,
+  // false keeps the corridor half. The Digit1 eye frame is wider past ~80 m.
+  frameEye = true
 } = {}) {
   const list = (meshes || []).map((mesh) => meshRiseBox(mesh, sidewalk)).filter(Boolean);
   const solidList = (solids || []).filter((solid) => solid?.triangles?.length >= 9);
@@ -536,7 +555,8 @@ export function canyonGlassWalls(walls, meshes, {
       const x = wall.x + wall.dx * t;
       const z = wall.z + wall.dz * t;
       const frame = lookFrame(x, z, eye);
-      if (!(frame.along > 8 && frame.along <= reach && Math.abs(frame.side) <= half)) {
+      const sideLimit = frameEye === false ? half : digit1EyeFrameHalf(frame.along, half);
+      if (!(frame.along > 8 && frame.along <= reach && Math.abs(frame.side) <= sideLimit)) {
         drop.push(false);
         continue;
       }

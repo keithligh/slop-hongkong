@@ -265,6 +265,16 @@ export function gltfBoxChase(entry, eye = HK_STREET_EYE) {
   return { minAlong, maxAlong, minSide, maxSide };
 }
 
+// Past this, a loaded chase mesh is the far frame. The 260 m box test does not
+// own its triangles, and a null-fill omit there opens onto the 2017 aerial.
+// The Bank of China Tower box is closer than this (about 189 m). Henderson is not.
+export const DIGIT1_FAR_CHASE = 200;
+
+export function landsdFarChaseMesh(entry, eye = HK_STREET_EYE, past = DIGIT1_FAR_CHASE) {
+  if (!entry || !gltfInStreetChase(entry, eye)) return false;
+  return boxClosestDistance(entry, eye) > past;
+}
+
 // The person chase, not a radius. A facade whose box crosses the look corridor
 // is on screen at eye height: The Henderson sits on this ray past 120 m, and a
 // mip chain there is the brown smear. Masses behind the camera do not qualify.
@@ -693,6 +703,90 @@ export function landsdNullFillTriangles(index, sampleVertex, sampleCentroid) {
     kept.push(a, b, c);
   }
   return { index: kept, dropped };
+}
+
+function nearestPhotoUv(u, v, anchors) {
+  let best = anchors[0];
+  let bestD = Infinity;
+  for (const anchor of anchors) {
+    const du = anchor[0] - u;
+    const dv = anchor[1] - v;
+    const d = du * du + dv * dv;
+    if (d < bestD) {
+      bestD = d;
+      best = anchor;
+    }
+  }
+  return best;
+}
+
+function thinPhotoAnchors(anchors, cap) {
+  if (anchors.length <= cap) return anchors;
+  const step = Math.ceil(anchors.length / cap);
+  const out = [];
+  for (let i = 0; i < anchors.length && out.length < cap; i += step) out.push(anchors[i]);
+  return out;
+}
+
+// A null-fill triangle on a far chase mesh is a hole onto the 2017 aerial.
+// Keep the triangle and aim every corner at the nearest photograph UV in the
+// same mesh. A mesh with no photograph still drops the triangle: nothing here
+// invents a texel. Photo triangles keep their vertices, so a shared corner is
+// copied rather than moved.
+export function landsdSealFarNullTriangles(index, sampleVertex, sampleCentroid, readUv, vertexCount) {
+  const src = index || [];
+  let count = vertexCount | 0;
+  if (!(count > 0)) {
+    for (const vertex of src) if (vertex + 1 > count) count = vertex + 1;
+  }
+  const nullTri = [];
+  const anchors = [];
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ca = sampleVertex(a);
+    const cb = sampleVertex(b);
+    const cc = sampleVertex(c);
+    const cornersNull = texelIsNull(ca) && texelIsNull(cb) && texelIsNull(cc);
+    const centroidNull = sampleCentroid ? texelIsNull(sampleCentroid(a, b, c)) : false;
+    const isNull = cornersNull || centroidNull;
+    nullTri.push(isNull);
+    if (isNull) continue;
+    for (const vertex of [a, b, c]) {
+      if (texelIsNull(sampleVertex(vertex))) continue;
+      const uv = readUv(vertex);
+      if (!uv || uv.length < 2 || !Number.isFinite(uv[0]) || !Number.isFinite(uv[1])) continue;
+      anchors.push(uv);
+    }
+  }
+  if (!anchors.length) {
+    const dropped = landsdNullFillTriangles(src, sampleVertex, sampleCentroid);
+    return { index: dropped.index, copies: [], sealed: 0, dropped: dropped.dropped };
+  }
+  const pool = thinPhotoAnchors(anchors, 96);
+  const kept = [];
+  const copies = [];
+  let sealed = 0;
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    if (!nullTri[t / 3]) {
+      kept.push(a, b, c);
+      continue;
+    }
+    for (const vertex of [a, b, c]) {
+      const uv = readUv(vertex);
+      const u = uv && Number.isFinite(uv[0]) ? uv[0] : 0;
+      const v = uv && Number.isFinite(uv[1]) ? uv[1] : 0;
+      const nearest = nearestPhotoUv(u, v, pool);
+      copies.push({ from: vertex, u: nearest[0], v: nearest[1] });
+      kept.push(count + copies.length - 1);
+    }
+    sealed++;
+  }
+  return { index: kept, copies, sealed, dropped: 0 };
 }
 
 const COMPS = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };

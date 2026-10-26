@@ -21,6 +21,7 @@ import {
   hkResolveLandmarks
 } from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
+import { measureDigit1FarFrame } from '../js/digit1-far-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -40,6 +41,7 @@ import {
   isLandsdAtlasGutter,
   isLandsdNullTexel,
   isLandsdOnEyeChart,
+  landsdFarChaseMesh,
   LANDSD_ON_EYE_HITS,
   LANDSD_ON_EYE_PAD,
   landsdChartPixels,
@@ -757,6 +759,41 @@ export function digit1OnEyeAtlasFidelity(sources) {
   return true;
 }
 
+// Primary bar for Cut #39. The Digit1 eye frames past the 72 m corridor, and a
+// null-fill omit on a chase mesh past 200 m is a hole onto the 2017 aerial.
+// The crop is that eye: curtain MAD and seal MAD are measured RGB deltas, and
+// grain is hp_std_3x3. A source-string check alone does not pass. Soft PlanD
+// at the waived low samples stays. Henderson's interior is not punched.
+// Mid-band photo stays an open residual. This is not a Sleeping Dogs claim.
+export function digit1FarFrameFidelity(sources) {
+  const eye = measureDigit1FarFrame();
+  if (!(eye.along > 200)) return false;
+  if (!(eye.side > eye.corridorHalf)) return false;
+  if (!(eye.frameHalf > eye.side)) return false;
+  if (!(Math.abs(eye.ndcX) < 1 && eye.ndcY > -0.35 && eye.ndcY < 0.85 && eye.depth > 80)) return false;
+  if (eye.beforeGlass !== 1 || eye.afterGlass !== 0) return false;
+  if (eye.bareGlass !== 1) return false;
+  if (!(eye.curtainMad >= 4)) return false;
+  if (!(eye.sealMad >= 4)) return false;
+  if (!(eye.mad >= 4)) return false;
+  if (!(eye.grainDelta < -0.5)) return false;
+  if (eye.sealed !== 1 || !(eye.sealU > 0.5)) return false;
+  if (landsdFarChaseMesh(HK_BOC_PHOTO_CHART)) return false;
+  if (!landsdFarChaseMesh(HENDERSON)) return false;
+  if (plandOmitsDigit1FlankChart({ x: 230, y: 40, z: 80 }, [HENDERSON]) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  if (plandOmitsDigit1MidbandPlate({ x: 84.93, y: 14.7, z: 77.32 }) !== true) return false;
+  if (HK_MIDBAND_PHOTO_CHARTS.length !== 0) return false;
+  const page = sources?.gltfPage || '';
+  const ground = sources?.ground || '';
+  if (!/sealLandsdFarNullFill\(geo, obj\.material\)/.test(page)) return false;
+  if (!/landsdFarChaseMesh\(entry\)/.test(page)) return false;
+  if (!/far-frame seal/.test(page)) return false;
+  if (!/digit1EyeFrameHalf\(frame\.along, half\)/.test(ground)) return false;
+  if (!/frameEye === false \? half : digit1EyeFrameHalf/.test(ground)) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -784,6 +821,7 @@ export function readDigit1Sources(root) {
     frame: read('js/hk-pland-frame.js'),
     pland: read('js/hk-pland.js'),
     grid: read('js/city-grid.js'),
+    ground: read('js/hk-ground-fill.js'),
     gltf: read('js/hk-gltf-frame.js'),
     gltfPage: read('js/hk-gltf.js'),
     fetch: read('tools/fetch-central-gltf-sheet.mjs'),
@@ -815,6 +853,7 @@ export function digit1InvaderGate(root) {
     digit1PhotoFidelity: digit1PhotoFidelity(sources),
     digit1PhotoAtlasFidelity: digit1PhotoAtlasFidelity(sources),
     digit1OnEyeAtlasFidelity: digit1OnEyeAtlasFidelity(sources),
+    digit1FarFrameFidelity: digit1FarFrameFidelity(sources),
     digit1MidbandPhotoFidelity: digit1MidbandPhotoFidelity(sources)
   };
   // #22–#37 holds. The mid-band photograph is an open residual until a BUILDING
@@ -838,6 +877,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1PhotoFidelity === true
     && bars.digit1PhotoAtlasFidelity === true
     && bars.digit1OnEyeAtlasFidelity === true
+    && bars.digit1FarFrameFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   const openResiduals = [];
   if (bars.digit1MidbandPhotoFidelity !== true) openResiduals.push('digit1MidbandPhotoFidelity');

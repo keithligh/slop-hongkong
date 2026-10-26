@@ -40,7 +40,9 @@ import {
   landsdDilateGutter,
   landsdGutterMip,
   packLandsdChartBins,
+  landsdFarChaseMesh,
   landsdNullFillTriangles,
+  landsdSealFarNullTriangles,
   remapLandsdChartUv,
   NULL_FILL_EDGE,
   nullFillSampleSize,
@@ -279,6 +281,54 @@ test('LandsD null-fill triangles drop and a photographed corner stays', () => {
   assert.equal(landsdAlbedoRow(0, 4096), 0);
   assert.equal(landsdAlbedoRow(0.727, 4096), 2977);
   assert.ok(landsdAlbedoRow(0.727, 4096) > 2048);
+});
+
+test('a far chase null triangle seals to a photograph UV; a chartless mesh still drops', () => {
+  const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96 };
+  assert.equal(landsdFarChaseMesh(henderson), true);
+  assert.equal(landsdFarChaseMesh(HK_BOC_PHOTO_CHART), false);
+  const colors = [
+    [136, 138, 137],
+    [136, 138, 137],
+    [137, 138, 136],
+    [32, 44, 62],
+    [28, 40, 56],
+    [36, 48, 66]
+  ];
+  const uvs = [
+    [0.04, 0.06],
+    [0.08, 0.05],
+    [0.06, 0.1],
+    [0.72, 0.64],
+    [0.78, 0.66],
+    [0.74, 0.7]
+  ];
+  const sealed = landsdSealFarNullTriangles(
+    [0, 1, 2, 3, 4, 5],
+    (vertex) => colors[vertex],
+    null,
+    (vertex) => uvs[vertex],
+    6
+  );
+  assert.equal(sealed.sealed, 1);
+  assert.equal(sealed.dropped, 0);
+  assert.equal(sealed.copies.length, 3);
+  assert.deepEqual(sealed.index.slice(0, 3), [3, 4, 5]);
+  assert.deepEqual(sealed.index.slice(3), [6, 7, 8]);
+  assert.ok(sealed.copies.every((copy) => copy.u > 0.5 && copy.v > 0.5));
+  const empty = landsdSealFarNullTriangles(
+    [0, 1, 2],
+    () => [136, 138, 137],
+    null,
+    () => [0.1, 0.1],
+    3
+  );
+  assert.equal(empty.sealed, 0);
+  assert.equal(empty.dropped, 1);
+  assert.deepEqual(empty.index, []);
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /sealLandsdFarNullFill\(geo, obj\.material\)/);
+  assert.match(page, /landsdFarChaseMesh\(entry\)/);
 });
 
 test('null-fill samples a 4096 atlas at 1024 so a chart-grey edge stays a chart', () => {
