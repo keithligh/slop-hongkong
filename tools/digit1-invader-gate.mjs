@@ -35,14 +35,19 @@ import {
   footprintOverlapRatio,
   gltfAlbedoSampler,
   gltfCoversFootprint,
+  groupLandsdOnEyeCharts,
   hkGltfBoxContains,
   isLandsdAtlasGutter,
   isLandsdNullTexel,
+  isLandsdOnEyeChart,
+  LANDSD_ON_EYE_HITS,
+  LANDSD_ON_EYE_PAD,
   landsdChartPixels,
   landsdChartRect,
   landsdChartWrap,
   landsdDilateGutter,
   landsdGutterMip,
+  packLandsdChartBins,
   remapLandsdChartUv
 } from '../js/hk-gltf-frame.js';
 import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
@@ -688,6 +693,70 @@ export function digit1PhotoAtlasFidelity(sources) {
   return true;
 }
 
+function onEyeFace(name) {
+  const hit = LANDSD_ON_EYE_HITS[name];
+  return {
+    minU: hit.face.minU,
+    minV: hit.face.minV,
+    maxU: hit.face.maxU,
+    maxV: hit.face.maxV
+  };
+}
+
+// Primary bar for Cut #38. The live Digit1 samples are full-bleed JPEGs, so
+// the primitive crop never runs. Each hit face is its own chart. The crop is
+// that face, with a replicated pad, not the fixture strip beside it.
+export function digit1OnEyeAtlasFidelity(sources) {
+  const names = Object.keys(LANDSD_ON_EYE_HITS);
+  if (names.length !== 3) return false;
+  for (const name of names) {
+    if (!isLandsdOnEyeChart(name)) return false;
+    const hit = LANDSD_ON_EYE_HITS[name];
+    const primitive = hit.primitive;
+    if (landsdChartRect(primitive.minU, primitive.minV, primitive.maxU, primitive.maxV) !== null) return false;
+    const face = onEyeFace(name);
+    const rect = landsdChartRect(face.minU, face.minV, face.maxU, face.maxV);
+    if (!rect) return false;
+    const du = rect.u1 - rect.u0;
+    const dv = rect.v1 - rect.v0;
+    if (name === 'B345471572201063A0_001' && !(du < 0.05 && dv < 0.2)) return false;
+    if (name === 'B346831557701063A0_003' && !(du < 0.5 && dv < 0.2)) return false;
+    if (name === 'B346831557701063A0_002' && !(du < 0.1 && dv < 0.3)) return false;
+  }
+  if (isLandsdOnEyeChart('B346831557701063A0_001')) return false;
+  if (isLandsdOnEyeChart('B345471572201063A0_002')) return false;
+  const faces = names.map((name) => onEyeFace(name));
+  const grouped = groupLandsdOnEyeCharts(0, 0, 1, 1, faces);
+  if (!grouped || grouped.groups.length < 2) return false;
+  const flank = grouped.groups.find((group) => group.triangles.includes(names.indexOf('B345471572201063A0_001')));
+  if (!flank || !(flank.rect.u0 > 0.756)) return false;
+  if (groupLandsdOnEyeCharts(BOC_REPEAT_UV.minU, BOC_REPEAT_UV.minV, BOC_REPEAT_UV.maxU, BOC_REPEAT_UV.maxV, faces) !== null) return false;
+  if (groupLandsdOnEyeCharts(0, 0, 0.5, 0.9488099813461304, faces) !== null) return false;
+  const slots = packLandsdChartBins([
+    { width: 70, height: 400 },
+    { width: 80, height: 200 }
+  ]);
+  if (!slots[0] || !slots[1] || slots[0].atlas !== 0 || slots[1].atlas !== 0) return false;
+  if (slots[0].pad !== LANDSD_ON_EYE_PAD || slots[0].pad !== 16) return false;
+  const overlap = slots[0].x < slots[1].x + slots[1].width
+    && slots[1].x < slots[0].x + slots[0].width
+    && slots[0].y < slots[1].y + slots[1].height
+    && slots[1].y < slots[0].y + slots[0].height;
+  if (overlap) return false;
+  if (packLandsdChartBins([{ width: 4080, height: 8 }])[0] !== null) return false;
+  const page = sources?.gltfPage || '';
+  const frame = sources?.gltf || '';
+  if (!/export function splitLandsdOnEyeCharts/.test(page)) return false;
+  if (!/splitLandsdOnEyeCharts\(geo, obj\.material, sampler\)/.test(page)) return false;
+  if (!/packLandsdChart\(geo, obj\.material, sampler\)/.test(page)) return false;
+  if (!/export function groupLandsdOnEyeCharts/.test(frame)) return false;
+  if (!/B346831557701063A0_002/.test(frame) || !/B346831557701063A0_003/.test(frame)) return false;
+  if (!/B345471572201063A0_001/.test(frame)) return false;
+  if (/mapillary/i.test(page)) return false;
+  if (HK_MIDBAND_PHOTO_CHARTS.length !== 0) return false;
+  return true;
+}
+
 // Canyon pack is the chart the flank yield uncovers. No ashlar slab, no orange ribbon.
 export function digit1CanyonDensity(sources, plan) {
   if (!noAshlarInvaderSlabs(sources, plan)) return false;
@@ -745,9 +814,10 @@ export function digit1InvaderGate(root) {
     digit1MidbandFacadeFidelity: digit1MidbandFacadeFidelity(sources),
     digit1PhotoFidelity: digit1PhotoFidelity(sources),
     digit1PhotoAtlasFidelity: digit1PhotoAtlasFidelity(sources),
+    digit1OnEyeAtlasFidelity: digit1OnEyeAtlasFidelity(sources),
     digit1MidbandPhotoFidelity: digit1MidbandPhotoFidelity(sources)
   };
-  // #22–#35 holds. The mid-band photograph is an open residual until a BUILDING
+  // #22–#37 holds. The mid-band photograph is an open residual until a BUILDING
   // chart covers the hits. A documented miss does not fail this suite.
   bars.pass = bars.noAshlarInvaderSlabs
     && bars.noZombieSkyHoles
@@ -767,6 +837,7 @@ export function digit1InvaderGate(root) {
     && bars.digit1MidbandFacadeFidelity === true
     && bars.digit1PhotoFidelity === true
     && bars.digit1PhotoAtlasFidelity === true
+    && bars.digit1OnEyeAtlasFidelity === true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   const openResiduals = [];
   if (bars.digit1MidbandPhotoFidelity !== true) openResiduals.push('digit1MidbandPhotoFidelity');

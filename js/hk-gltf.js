@@ -13,10 +13,15 @@ import {
   hk80ToWorld,
   isGltfPinSheet,
   landsdAlbedoRow,
+  groupLandsdOnEyeCharts,
+  isLandsdOnEyeChart,
+  LANDSD_ON_EYE_ATLAS,
+  LANDSD_ON_EYE_PAD,
   landsdChartPixels,
   landsdChartRect,
   landsdChartWrap,
   landsdDilateGutter,
+  packLandsdChartBins,
   landsdGutterFraction,
   landsdGutterMip,
   landsdNullFillTriangles,
@@ -253,6 +258,221 @@ function uploadChaseMips(tex, sampler, wrap) {
   tex.userData.hkChartMips = true;
   tex.userData.hkFullRes = true;
   tex.needsUpdate = true;
+}
+
+function activeIndex(geo) {
+  const index = geo.getIndex();
+  if (!index) {
+    const n = geo.getAttribute('position')?.count || 0;
+    const out = [];
+    for (let i = 0; i < n; i++) out.push(i);
+    return out;
+  }
+  const arr = index.array;
+  const start = geo.drawRange?.start || 0;
+  const count = geo.drawRange && Number.isFinite(geo.drawRange.count) ? geo.drawRange.count : arr.length;
+  const end = Math.min(arr.length, start + count);
+  const out = [];
+  for (let i = start; i < end; i++) out.push(arr[i]);
+  return out;
+}
+
+function triangleUv(uv, index, triangle) {
+  const base = triangle * 3;
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  for (let k = 0; k < 3; k++) {
+    const vertex = index[base + k];
+    if (vertex < 0 || vertex >= uv.count) continue;
+    const u = uv.getX(vertex);
+    const v = uv.getY(vertex);
+    if (u < minU) minU = u;
+    if (v < minV) minV = v;
+    if (u > maxU) maxU = u;
+    if (v > maxV) maxV = v;
+  }
+  return { minU, minV, maxU, maxV };
+}
+
+function copyChartPixels(src, sw, atlas, size, pixels, slot) {
+  const { x0, y0, width, height } = pixels;
+  const destX = slot.contentX;
+  const destY = slot.contentY;
+  for (let dy = 0; dy < height; dy++) {
+    const srcRow = (y0 + dy) * sw + x0;
+    const dstRow = (destY + dy) * size + destX;
+    for (let dx = 0; dx < width; dx++) {
+      const s = (srcRow + dx) * 4;
+      const d = (dstRow + dx) * 4;
+      atlas[d] = src[s];
+      atlas[d + 1] = src[s + 1];
+      atlas[d + 2] = src[s + 2];
+      atlas[d + 3] = src[s + 3];
+    }
+  }
+  const pad = slot.pad;
+  for (let dy = 0; dy < height; dy++) {
+    const row = (destY + dy) * size;
+    const left = (row + destX) * 4;
+    const right = (row + destX + width - 1) * 4;
+    for (let p = 1; p <= pad; p++) {
+      const dl = (row + destX - p) * 4;
+      const dr = (row + destX + width - 1 + p) * 4;
+      atlas[dl] = atlas[left];
+      atlas[dl + 1] = atlas[left + 1];
+      atlas[dl + 2] = atlas[left + 2];
+      atlas[dl + 3] = atlas[left + 3];
+      atlas[dr] = atlas[right];
+      atlas[dr + 1] = atlas[right + 1];
+      atlas[dr + 2] = atlas[right + 2];
+      atlas[dr + 3] = atlas[right + 3];
+    }
+  }
+  const span = width + pad * 2;
+  const slotX = slot.x;
+  for (let p = 1; p <= pad; p++) {
+    for (let dx = 0; dx < span; dx++) {
+      const top = ((destY) * size + slotX + dx) * 4;
+      const up = ((destY - p) * size + slotX + dx) * 4;
+      const bot = ((destY + height - 1) * size + slotX + dx) * 4;
+      const down = ((destY + height - 1 + p) * size + slotX + dx) * 4;
+      atlas[up] = atlas[top];
+      atlas[up + 1] = atlas[top + 1];
+      atlas[up + 2] = atlas[top + 2];
+      atlas[up + 3] = atlas[top + 3];
+      atlas[down] = atlas[bot];
+      atlas[down + 1] = atlas[bot + 1];
+      atlas[down + 2] = atlas[bot + 2];
+      atlas[down + 3] = atlas[bot + 3];
+    }
+  }
+}
+
+function geometryForTriangles(geo, index, triangleIds) {
+  const kept = new Uint32Array(triangleIds.length * 3);
+  let n = 0;
+  for (const id of triangleIds) {
+    const base = id * 3;
+    kept[n++] = index[base];
+    kept[n++] = index[base + 1];
+    kept[n++] = index[base + 2];
+  }
+  const part = geo.clone();
+  part.setIndex(new THREE.BufferAttribute(kept, 1));
+  part.clearGroups();
+  return part;
+}
+
+function remapChartUv(geo, index, triangleIds, sw, sh, pixels, slot) {
+  const uv = geo.getAttribute('uv');
+  const seen = new Set();
+  const atlas = LANDSD_ON_EYE_ATLAS;
+  for (const id of triangleIds) {
+    const base = id * 3;
+    for (let k = 0; k < 3; k++) {
+      const vertex = index[base + k];
+      if (seen.has(vertex)) continue;
+      seen.add(vertex);
+      if (vertex < 0 || vertex >= uv.count) continue;
+      const u = uv.getX(vertex);
+      const v = uv.getY(vertex);
+      let nu = (slot.contentX + (u * sw - pixels.x0)) / atlas;
+      let nv = (slot.contentY + (v * sh - pixels.y0)) / atlas;
+      if (nu < 0) nu = 0;
+      else if (nu > 1) nu = 1;
+      if (nv < 0) nv = 0;
+      else if (nv > 1) nv = 1;
+      uv.setXY(vertex, nu, nv);
+    }
+  }
+  uv.needsUpdate = true;
+}
+
+function atlasTexture(sourceTex, canvas, sampler) {
+  const tex = new THREE.Texture(canvas);
+  tex.colorSpace = sourceTex.colorSpace || THREE.SRGBColorSpace;
+  tex.flipY = false;
+  tex.userData = { hkOnEyeAtlas: true };
+  uploadChaseMips(tex, sampler, 'clamp');
+  return tex;
+}
+
+// Full-bleed on-eye atlases (tower _002/_003, flank _001) address one face
+// per triangle. The primitive bounds cover the file, so the sub-rectangle
+// crop never runs, and the anisotropic kernel steps across the one-pixel
+// gutter into the next chart. Each face is copied with a replicated edge
+// and sampled from its own clamp border. Other materials keep packLandsdChart.
+export function splitLandsdOnEyeCharts(geo, material, sampler) {
+  if (!sampler?.chartMips || !geo || Array.isArray(material)) return null;
+  if (!isLandsdOnEyeChart(material?.name)) return null;
+  const sourceTex = material.map;
+  if (!sourceTex?.isTexture || !sourceTex.image) return null;
+  const uv = geo.getAttribute('uv');
+  if (!uv?.count) return null;
+  const index = activeIndex(geo);
+  if (index.length < 3) return null;
+  const bounds = uvBounds(geo);
+  if (!bounds) return null;
+  const triangles = [];
+  for (let t = 0; t + 2 < index.length; t += 3) triangles.push(triangleUv(uv, index, t / 3));
+  const grouped = groupLandsdOnEyeCharts(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV, triangles);
+  if (!grouped) return null;
+  const pixels = readImagePixels(sourceTex.image);
+  if (!pixels) return null;
+  const sw = pixels.width;
+  const sh = pixels.height;
+  const charts = grouped.groups.map((group) => {
+    const px = landsdChartPixels(group.rect, sw, sh);
+    return { group, px };
+  });
+  const slots = packLandsdChartBins(charts.map((chart) => ({
+    width: chart.px.width,
+    height: chart.px.height
+  })), LANDSD_ON_EYE_ATLAS, LANDSD_ON_EYE_PAD);
+  const byAtlas = new Map();
+  const restIds = grouped.rest.slice();
+  charts.forEach((chart, i) => {
+    const slot = slots[i];
+    if (!slot || !chart.px) {
+      restIds.push(...chart.group.triangles);
+      return;
+    }
+    let bin = byAtlas.get(slot.atlas);
+    if (!bin) {
+      bin = {
+        data: new Uint8ClampedArray(LANDSD_ON_EYE_ATLAS * LANDSD_ON_EYE_ATLAS * 4),
+        triangles: []
+      };
+      byAtlas.set(slot.atlas, bin);
+    }
+    copyChartPixels(pixels.data, sw, bin.data, LANDSD_ON_EYE_ATLAS, chart.px, slot);
+    bin.triangles.push({ ids: chart.group.triangles, px: chart.px, slot });
+  });
+  if (!byAtlas.size) return null;
+  const pieces = [];
+  for (const bin of byAtlas.values()) {
+    const ids = [];
+    for (const part of bin.triangles) ids.push(...part.ids);
+    const partGeo = geometryForTriangles(geo, index, ids);
+    for (const part of bin.triangles) remapChartUv(partGeo, index, part.ids, sw, sh, part.px, part.slot);
+    const canvas = canvasFromPixels(bin.data, LANDSD_ON_EYE_ATLAS, LANDSD_ON_EYE_ATLAS);
+    if (!canvas) return null;
+    const mat = material.clone();
+    const tex = atlasTexture(sourceTex, canvas, sampler);
+    mat.map = tex;
+    if (mat.emissiveMap === sourceTex) mat.emissiveMap = tex;
+    pieces.push({ geo: partGeo, material: mat, atlas: true });
+  }
+  if (restIds.length) {
+    pieces.push({
+      geo: geometryForTriangles(geo, index, restIds),
+      material,
+      atlas: false
+    });
+  }
+  return pieces;
 }
 
 // Crop a sub-rectangle chart, remap its UVs into that crop, and mip the
@@ -576,19 +796,36 @@ export async function mountHkGltfBuildings(scene, plan) {
           return;
         }
         const sampler = gltfAlbedoSampler(entry);
-        packLandsdChart(geo, obj.material, sampler);
-        sharpenPhoto(obj.material, sampler);
-        const mesh = new THREE.Mesh(geo, obj.material);
-        mesh.name = 'HkGltfBuilding';
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.userData.hkBuildingId = buildingIdOf(entry);
-        mesh.userData.hkFile = entry.file || '';
-        mesh.userData.hkSheet = entry.sheet || '';
-        mesh.userData.hkSource = 'landsd';
-        mesh.userData.hkNullDropped = dropped;
-        group.add(mesh);
-        meshes++;
+        const placeMesh = (partGeo, material) => {
+          const mesh = new THREE.Mesh(partGeo, material);
+          mesh.name = 'HkGltfBuilding';
+          mesh.castShadow = true;
+          mesh.receiveShadow = true;
+          mesh.userData.hkBuildingId = buildingIdOf(entry);
+          mesh.userData.hkFile = entry.file || '';
+          mesh.userData.hkSheet = entry.sheet || '';
+          mesh.userData.hkSource = 'landsd';
+          mesh.userData.hkNullDropped = dropped;
+          group.add(mesh);
+          meshes++;
+        };
+        const pieces = splitLandsdOnEyeCharts(geo, obj.material, sampler);
+        if (!pieces) {
+          packLandsdChart(geo, obj.material, sampler);
+          sharpenPhoto(obj.material, sampler);
+          placeMesh(geo, obj.material);
+        } else {
+          // Atlas UVs already sit inside the replicated pad. A second crop
+          // would cut that pad off. Rest triangles still use the file.
+          geo.dispose();
+          const bins = pieces.filter((piece) => piece.atlas).length;
+          console.info(`[gltf] on-eye atlas ${obj.material?.name || ''} bins ${bins}`);
+          for (const piece of pieces) {
+            if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
+            sharpenPhoto(piece.material, sampler);
+            placeMesh(piece.geo, piece.material);
+          }
+        }
       });
       if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
       if (!meshes) throw new Error('no meshes');

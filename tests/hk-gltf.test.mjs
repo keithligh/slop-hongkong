@@ -30,11 +30,16 @@ import {
   isLandsdAtlasGutter,
   isLandsdNullTexel,
   landsdAlbedoRow,
+  groupLandsdOnEyeCharts,
+  isLandsdOnEyeChart,
+  LANDSD_ON_EYE_HITS,
+  LANDSD_ON_EYE_PAD,
   landsdChartPixels,
   landsdChartRect,
   landsdChartWrap,
   landsdDilateGutter,
   landsdGutterMip,
+  packLandsdChartBins,
   landsdNullFillTriangles,
   remapLandsdChartUv,
   NULL_FILL_EDGE,
@@ -424,6 +429,54 @@ test('a LandsD sub-rectangle chart crops, and a gutter mip keeps the photograph'
   assert.equal(shore[4], 10);
   assert.equal(shore[5], 20);
   assert.equal(shore[0], 10);
+});
+
+test('Digit1 on-eye faces crop inside the full-bleed atlas, and the fixture strip does not', () => {
+  const names = Object.keys(LANDSD_ON_EYE_HITS);
+  assert.deepEqual(names, [
+    'B346831557701063A0_002',
+    'B346831557701063A0_003',
+    'B345471572201063A0_001'
+  ]);
+  const faces = names.map((name) => {
+    const hit = LANDSD_ON_EYE_HITS[name];
+    assert.equal(isLandsdOnEyeChart(name), true);
+    assert.equal(landsdChartRect(hit.primitive.minU, hit.primitive.minV, hit.primitive.maxU, hit.primitive.maxV), null);
+    const face = landsdChartRect(hit.face.minU, hit.face.minV, hit.face.maxU, hit.face.maxV);
+    assert.ok(face);
+    return hit.face;
+  });
+  assert.equal(isLandsdOnEyeChart('B346831557701063A0_001'), false);
+  assert.equal(isLandsdOnEyeChart('B345471572201063A0_002'), false);
+  const grouped = groupLandsdOnEyeCharts(0, 0, 1, 1, faces);
+  assert.equal(grouped.groups.length, 3);
+  assert.equal(grouped.rest.length, 0);
+  const flank = grouped.groups.find((group) => group.rect.u0 > 0.756 && group.rect.u1 < 0.8);
+  assert.ok(flank);
+  assert.ok(flank.rect.u1 - flank.rect.u0 < 0.05);
+  assert.equal(groupLandsdOnEyeCharts(-4.07, 0, 5.8, 1, faces), null);
+  assert.equal(groupLandsdOnEyeCharts(0, 0, 0.5, 0.9488099813461304, faces), null);
+  const mixed = groupLandsdOnEyeCharts(0, 0, 1, 1, [
+    faces[0],
+    { minU: 0.2, minV: 0.2, maxU: 0.205, maxV: 0.205 }
+  ]);
+  assert.equal(mixed.groups.length, 1);
+  assert.deepEqual(mixed.rest, [1]);
+  assert.equal(groupLandsdOnEyeCharts(0, 0, 1, 1, [{ minU: 0.2, minV: 0.2, maxU: 0.205, maxV: 0.205 }]), null);
+  const slots = packLandsdChartBins([
+    { width: 70, height: 400 },
+    { width: 80, height: 200 }
+  ]);
+  assert.equal(slots[0].atlas, 0);
+  assert.equal(slots[1].atlas, 0);
+  assert.equal(slots[0].pad, LANDSD_ON_EYE_PAD);
+  assert.equal(slots[0].contentX, slots[0].x + 16);
+  const overlap = slots[0].x < slots[1].x + slots[1].width
+    && slots[1].x < slots[0].x + slots[0].width
+    && slots[0].y < slots[1].y + slots[1].height
+    && slots[1].y < slots[0].y + slots[0].height;
+  assert.equal(overlap, false);
+  assert.equal(packLandsdChartBins([{ width: 4080, height: 8 }])[0], null);
 });
 
 test('a baked LandsD triangle sits on the sidewalk and the boot passes it to the look ray', () => {

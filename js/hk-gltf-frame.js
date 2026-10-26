@@ -348,6 +348,8 @@ export function isLandsdAtlasGutter(r, g, b) {
 // A chase primitive that uses one sub-rectangle of the atlas. Full-bleed
 // charts (both axes cover the image) and repeating charts (UVs outside the
 // image) are not crops: cropping those would either do nothing or cut a tile.
+// A full-bleed primitive can still be a stack of smaller face charts. Those
+// are grouped by groupLandsdOnEyeCharts, not by this rect.
 export function landsdChartWrap(minU, minV, maxU, maxV) {
   if (![minU, minV, maxU, maxV].every(Number.isFinite)) return 'clamp';
   if (minU < -0.002 || minV < -0.002 || maxU > 1.002 || maxV > 1.002) return 'repeat';
@@ -365,6 +367,167 @@ export function landsdChartRect(minU, minV, maxU, maxV) {
   if (!(du > 0.01 && dv > 0.01)) return null;
   if (du >= 0.9 && dv >= 0.9) return null;
   return { u0, v0, u1, v1 };
+}
+
+// Digit1 actually samples these three atlases. Each one is full-bleed, so
+// the primitive rect above is null, while the hit face is a small chart
+// with a one-pixel gutter into the next chart. The fixture exemplars are
+// not in this list: tower _001 is the left strip, flank _002 is the left half.
+export const LANDSD_ON_EYE_CHARTS = Object.freeze([
+  'B346831557701063A0_002',
+  'B346831557701063A0_003',
+  'B345471572201063A0_001'
+]);
+
+// Ray hits at ?at=-1.4,29.3,1.29. Primitive bounds cover the JPEG, so
+// landsdChartRect is null. The face is the triangle the ray landed on.
+export const LANDSD_ON_EYE_HITS = Object.freeze({
+  B346831557701063A0_002: Object.freeze({
+    primitive: Object.freeze({ minU: 0, minV: 0, maxU: 1, maxV: 0.9980000257492065 }),
+    face: Object.freeze({
+      minU: 0.8590679168701172,
+      minV: 0.5014269351959229,
+      maxU: 0.9172242283821106,
+      maxV: 0.7400000095367432
+    })
+  }),
+  B346831557701063A0_003: Object.freeze({
+    primitive: Object.freeze({
+      minU: 0,
+      minV: 0.0009999871253967285,
+      maxU: 1,
+      maxV: 0.9990000128746033
+    }),
+    face: Object.freeze({
+      minU: 0.5049999952316284,
+      minV: 0.0009999871253967285,
+      maxU: 0.9210000038146973,
+      maxV: 0.125
+    })
+  }),
+  B345471572201063A0_001: Object.freeze({
+    primitive: Object.freeze({
+      minU: 0.00026535987854003906,
+      minV: 0,
+      maxU: 1,
+      maxV: 0.996999979019165
+    }),
+    face: Object.freeze({
+      minU: 0.7569730281829834,
+      minV: 0.3320434093475342,
+      maxU: 0.7739664912223816,
+      maxV: 0.4330368638038635
+    })
+  })
+});
+
+export function isLandsdOnEyeChart(name) {
+  return LANDSD_ON_EYE_CHARTS.includes(name);
+}
+
+// 16 px on a 4096 atlas. Faces that share a cell share one crop.
+const ON_EYE_QUANTUM = 1 / 256;
+
+// Pad the cropped face by the anisotropy kernel so a sample on the chart
+// edge replicates the photograph instead of the next chart.
+export const LANDSD_ON_EYE_PAD = 16;
+export const LANDSD_ON_EYE_ATLAS = 4096;
+
+// Group triangles of a full-bleed primitive by the chart each face uses.
+// The map key is a 1/256 cell so faces of one chart share a crop. The crop
+// is the tight union of those faces, not the cell: rounding out to the cell
+// would pull the one-pixel gutter, and the chart beside it, into the bitmap.
+// A primitive that is already one sub-rectangle, or that repeats, returns
+// null so the existing crop path keeps it. Triangles too small to be a
+// chart (or the collapsed UV cluster) stay in `rest` on the original image.
+export function groupLandsdOnEyeCharts(minU, minV, maxU, maxV, triangles) {
+  if (landsdChartWrap(minU, minV, maxU, maxV) !== 'clamp') return null;
+  if (landsdChartRect(minU, minV, maxU, maxV)) return null;
+  const groups = new Map();
+  const rest = [];
+  const list = triangles || [];
+  for (let i = 0; i < list.length; i++) {
+    const tri = list[i];
+    const face = landsdChartRect(tri.minU, tri.minV, tri.maxU, tri.maxV);
+    if (!face) {
+      rest.push(i);
+      continue;
+    }
+    const x0 = Math.floor(face.u0 / ON_EYE_QUANTUM);
+    const y0 = Math.floor(face.v0 / ON_EYE_QUANTUM);
+    const x1 = Math.ceil(face.u1 / ON_EYE_QUANTUM);
+    const y1 = Math.ceil(face.v1 / ON_EYE_QUANTUM);
+    const key = `${x0},${y0},${x1},${y1}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        rect: { u0: face.u0, v0: face.v0, u1: face.u1, v1: face.v1 },
+        triangles: []
+      };
+      groups.set(key, group);
+    } else {
+      if (face.u0 < group.rect.u0) group.rect.u0 = face.u0;
+      if (face.v0 < group.rect.v0) group.rect.v0 = face.v0;
+      if (face.u1 > group.rect.u1) group.rect.u1 = face.u1;
+      if (face.v1 > group.rect.v1) group.rect.v1 = face.v1;
+    }
+    group.triangles.push(i);
+  }
+  if (!groups.size) return null;
+  return { groups: [...groups.values()], rest };
+}
+
+// Shelf-pack chart bitmaps into 4096 atlases. Each slot is the chart plus
+// `pad` pixels of replicated edge on every side. A slot that cannot fit
+// the atlas is null; the caller leaves that face on the original image.
+export function packLandsdChartBins(rects, atlasSize = LANDSD_ON_EYE_ATLAS, pad = LANDSD_ON_EYE_PAD) {
+  const size = atlasSize | 0;
+  const gutter = Math.max(0, pad | 0);
+  const order = (rects || []).map((rect, index) => ({
+    index,
+    width: Math.max(1, rect.width | 0),
+    height: Math.max(1, rect.height | 0)
+  }));
+  order.sort((a, b) => b.height - a.height || a.index - b.index);
+  const placed = new Array((rects || []).length);
+  let atlas = 0;
+  let x = 0;
+  let y = 0;
+  let rowH = 0;
+  for (const item of order) {
+    const slotW = item.width + gutter * 2;
+    const slotH = item.height + gutter * 2;
+    if (slotW > size || slotH > size) {
+      placed[item.index] = null;
+      continue;
+    }
+    if (x > 0 && x + slotW > size) {
+      x = 0;
+      y += rowH;
+      rowH = 0;
+    }
+    if (y > 0 && y + slotH > size) {
+      atlas += 1;
+      x = 0;
+      y = 0;
+      rowH = 0;
+    }
+    placed[item.index] = {
+      atlas,
+      x,
+      y,
+      width: slotW,
+      height: slotH,
+      pad: gutter,
+      contentX: x + gutter,
+      contentY: y + gutter,
+      contentWidth: item.width,
+      contentHeight: item.height
+    };
+    x += slotW;
+    if (slotH > rowH) rowH = slotH;
+  }
+  return placed;
 }
 
 export function remapLandsdChartUv(u, v, rect) {

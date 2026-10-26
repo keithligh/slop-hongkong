@@ -615,6 +615,7 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1MidbandFacadeFidelity, true);
   assert.equal(gate.digit1PhotoFidelity, true);
   assert.equal(gate.digit1PhotoAtlasFidelity, true);
+  assert.equal(gate.digit1OnEyeAtlasFidelity, true);
   assert.equal(gate.digit1MidbandPhotoFidelity, false);
   assert.deepEqual(gate.openResiduals, ['digit1MidbandPhotoFidelity']);
   assert.equal(gate.sleepingDogsBar, 'NOT YET');
