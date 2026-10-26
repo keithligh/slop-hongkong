@@ -313,8 +313,9 @@ test('a far chase null triangle seals to a photograph UV; a chartless mesh still
   assert.equal(sealed.sealed, 1);
   assert.equal(sealed.dropped, 0);
   assert.equal(sealed.copies.length, 3);
-  assert.deepEqual(sealed.index.slice(0, 3), [3, 4, 5]);
-  assert.deepEqual(sealed.index.slice(3), [6, 7, 8]);
+  // Source order: the null triangle is copied first, then the photo triangle
+  // keeps vertices 3, 4, 5. The copy indices start at the mesh vertex count.
+  assert.deepEqual(sealed.index, [6, 7, 8, 3, 4, 5]);
   assert.ok(sealed.copies.every((copy) => copy.u > 0.5 && copy.v > 0.5));
   const empty = landsdSealFarNullTriangles(
     [0, 1, 2],

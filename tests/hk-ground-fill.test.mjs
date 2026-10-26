@@ -428,11 +428,13 @@ test('the Digit1 eye frame drops curtain outside the 72 m corridor when a loaded
   assert.equal(canyonGlassWalls([wall], [], { eye, solids: [lippo], frameEye: false }).length, 1);
   assert.equal(canyonGlassWalls([wall], [], { eye, solids: [lippo] }).length, 0);
   assert.equal(canyonGlassWalls([wall], [], { eye }).length, 1);
+  // Past the 260 m box cover and outside the 36 m lot radius. The widened
+  // frame still samples this ribbon; the box alone must not delete it.
   const farBox = {
-    minX: pose.cam.x + dir.x * (dist + 40) - 8,
-    maxX: pose.cam.x + dir.x * (dist + 40) + 8,
-    minZ: pose.cam.z + dir.z * (dist + 40) - 8,
-    maxZ: pose.cam.z + dir.z * (dist + 40) + 8,
+    minX: pose.cam.x + dir.x * 340 - 8,
+    maxX: pose.cam.x + dir.x * 340 + 8,
+    minZ: pose.cam.z + dir.z * 340 - 8,
+    maxZ: pose.cam.z + dir.z * 340 + 8,
     minH: 1,
     maxH: 150
   };
