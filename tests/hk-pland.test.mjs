@@ -15,6 +15,8 @@ import {
   PLAND_PODIUM_FACE,
   PLAND_BOC_PLATE_PEAK,
   PLAND_BOC_PLATE_PROUD,
+  PLAND_FAR_NDC_PAD,
+  PLAND_FAR_NDC_PAST,
   PLAND_FLANK_FACE,
   PLAND_FLANK_PROUD,
   PLAND_FLANK_TOP,
@@ -23,6 +25,7 @@ import {
   digit1LookFrame,
   digit1MidbandWallSpec,
   plandOmitsDigit1BocPlate,
+  plandOmitsDigit1FarNdc,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1MidbandPlate,
   plandOmitsPodiumInsideLandsd,
@@ -616,7 +619,10 @@ test('Digit1 donor mounts no corridor ashlar and keeps the belt-only omit', () =
   assert.equal(gate.digit1PhotoFidelity, true);
   assert.equal(gate.digit1PhotoAtlasFidelity, true);
   assert.equal(gate.digit1OnEyeAtlasFidelity, true);
-  assert.equal(gate.digit1FarFrameFidelity, true);
+  assert.equal(gate.digit1FarFramePolicy, true);
+  assert.equal(gate.digit1FarNdcOwned, true);
+  assert.equal(gate.digit1FarFrameFidelity, false);
+  assert.equal(gate.digit1FarFrameFidelityReason, 'live-msi-required');
   assert.equal(gate.digit1MidbandPhotoFidelity, false);
   assert.deepEqual(gate.openResiduals, ['digit1MidbandPhotoFidelity']);
   assert.equal(gate.sleepingDogsBar, 'NOT YET');
@@ -764,4 +770,34 @@ test('boot wires the flag, the fetch tool, and no street-view atlas bake', () =>
   const sources = `${main}\n${page}\n${tool}\n${frame}`;
   assert.doesNotMatch(sources, /mapillary|kartaview|openstreetcam/i);
   assert.doesNotMatch(page, /generative|dall-e|stable-diffusion/i);
+});
+
+test('PlanD yields the Lippo far NDC and keeps the waived Fairmont sample', () => {
+  assert.equal(PLAND_FAR_NDC_PAST, 320);
+  assert.equal(PLAND_FAR_NDC_PAD, 1);
+  const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178, minH: 5, maxH: 186 };
+  const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121, minH: 5, maxH: 160 };
+  const henderson = { minX: 217.54, maxX: 263.57, minZ: 53.74, maxZ: 104.96, minH: 5.75, maxH: 195.21 };
+  const midfar = { x: 341.83, y: 54.78, z: 158.31 };
+  const face = { x: 351.38, y: 59.4, z: 138.9 };
+  const centreLow = { x: 278.49, y: 15.44, z: 110.37 };
+  assert.ok(boxClosestDistance(fairmont, HK_STREET_EYE) < PLAND_FAR_NDC_PAST);
+  assert.ok(boxClosestDistance(henderson, HK_STREET_EYE) < PLAND_FAR_NDC_PAST);
+  assert.ok(boxClosestDistance(lippo, HK_STREET_EYE) > PLAND_FAR_NDC_PAST);
+  assert.equal(plandOmitsDigit1FlankChart(midfar, [lippo]), false);
+  assert.equal(plandOmitsDigit1LookGround(midfar), false);
+  assert.equal(plandOmitsDigit1FarNdc(midfar, [lippo]), true);
+  assert.equal(plandOmitsDigit1FarNdc(face, [lippo]), true);
+  assert.equal(plandOmitsDigit1FarNdc({ x: 340.8, y: 54.78, z: 158.31 }, [lippo]), true);
+  assert.equal(plandOmitsDigit1FarNdc({ x: 339.5, y: 54.78, z: 158.31 }, [lippo]), false);
+  assert.equal(plandOmitsDigit1FarNdc({ ...midfar, y: PLAND_FLANK_TOP }, [lippo]), false);
+  assert.equal(plandOmitsDigit1FarNdc(centreLow, [fairmont]), false);
+  assert.equal(plandOmitsDigit1FarNdc({ x: 279.3, y: 41.24, z: 110.61 }, [fairmont]), false);
+  assert.equal(plandOmitsDigit1FarNdc({ x: 230, y: 40, z: 80 }, [henderson]), false);
+  assert.equal(plandOmitsDigit1FarNdc(midfar, []), false);
+  assert.equal(plandOmitsDigit1FarNdc(null, [lippo]), false);
+  assert.equal(plandOmitsDigit1LookGround(centreLow), false);
+  const page = readFileSync(path.join(root, 'js/hk-pland.js'), 'utf8');
+  assert.match(page, /plandOmitsDigit1FarNdc\(mid, boxes\)/);
+  assert.match(page, /omitted \$\{farNdc\} triangles on the Digit1 far NDC in front of a sealed LandsD facade/);
 });

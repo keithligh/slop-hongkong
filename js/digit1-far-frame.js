@@ -127,10 +127,8 @@ function regionMad(before, after, width, height, x0, x1) {
   return n ? sum / n : 0;
 }
 
-// Eye crop of one far ribbon the 72 m corridor misses and the chase camera
-// still frames, plus a null-fill hole sealed to a photograph UV.
-// Before is the corridor-half curtain and the open hole. After is the frame
-// test and the sealed chart. The pixels are that policy, not a file export.
+// Policy fixture for the curtain and the far-chase seal. The buffer is painted
+// from those outcomes. It is not a Digit1 eye crop and it does not set Soft PASS.
 export function measureDigit1FarFrame(eye = HK_STREET_EYE) {
   const along = 210;
   const side = 96;
@@ -211,6 +209,122 @@ export function measureDigit1FarFrame(eye = HK_STREET_EYE) {
     sealMad: regionMad(before, after, width, height, curtainW, width),
     grainBefore,
     grainAfter,
-    grainDelta: grainAfter - grainBefore
+    grainDelta: grainAfter - grainBefore,
+    policy: true,
+    source: 'measureDigit1FarFrame',
+    before,
+    after
+  };
+}
+
+// Live MSI (or a rendered Digit1 eye crop) only. far39's midfar crop was
+// MAD 0.425 and grain Δ −0.005 against oneye38. These floors fail that package.
+// henderson_far is an acceptable crop. bocplate and rightmid are not.
+export const DIGIT1_FAR_LIVE_MAD_FLOOR = 2;
+export const DIGIT1_FAR_LIVE_GRAIN_FLOOR = 0.5;
+export const DIGIT1_FAR_LIVE_CROPS = Object.freeze(['midfar', 'farframe', 'henderson_far']);
+export const DIGIT1_FAR_LIVE_SOURCES = Object.freeze(['msi', 'rendered-eye']);
+
+export function digit1FarLiveFloors(metrics) {
+  const mad = metrics?.mad;
+  const grainDelta = metrics?.grainDelta;
+  if (!Number.isFinite(mad) || !Number.isFinite(grainDelta)) return false;
+  return mad >= DIGIT1_FAR_LIVE_MAD_FLOOR && Math.abs(grainDelta) >= DIGIT1_FAR_LIVE_GRAIN_FLOOR;
+}
+
+function emptyFarLive(reason, extra = {}) {
+  return {
+    pass: false,
+    reason,
+    live: false,
+    synthetic: false,
+    mad: 0,
+    grainBefore: 0,
+    grainAfter: 0,
+    grainDelta: 0,
+    crops: {},
+    ...extra
+  };
+}
+
+function sameBuffer(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function isPolicyPaint(capture, policy) {
+  if (!capture) return false;
+  if (capture.policy === true || capture.painted === true || capture.synthetic === true) return true;
+  const source = capture.source || '';
+  if (source === 'policy' || source === 'measureDigit1FarFrame') return true;
+  if (sameBuffer(capture.before, policy.before) && sameBuffer(capture.after, policy.after)) return true;
+  const crops = capture.crops || {};
+  for (const crop of Object.values(crops)) {
+    if (sameBuffer(crop?.before, policy.before) && sameBuffer(crop?.after, policy.after)) return true;
+  }
+  return false;
+}
+
+function scoreFarCrop(crop) {
+  if (!crop?.before || !crop?.after) return null;
+  const width = crop.width;
+  const height = crop.height;
+  if (!(width > 0) || !(height > 0)) return null;
+  const mad = keithEyeMad(crop.before, crop.after, width, height);
+  const grainBefore = keithEyeGrain(crop.before, width, height);
+  const grainAfter = keithEyeGrain(crop.after, width, height);
+  const grainDelta = grainAfter - grainBefore;
+  const scored = { mad, grainBefore, grainAfter, grainDelta };
+  return { ...scored, pass: digit1FarLiveFloors(scored) };
+}
+
+// Soft primary for the far look-corridor. PASS only when a live MSI pair, or a
+// rendered Digit1 eye crop, clears MAD and grain on midfar, farframe, or
+// henderson_far. The policy paint, a static path, and a near-flat far39 pair
+// do not pass. This is not a Sleeping Dogs claim.
+export function digit1FarFrameFidelity(capture) {
+  if (!capture || capture.live !== true) return emptyFarLive('live-msi-required');
+  const policy = measureDigit1FarFrame();
+  if (isPolicyPaint(capture, policy)) {
+    return emptyFarLive('synthetic-paint', { live: true, synthetic: true });
+  }
+  const source = capture.source || '';
+  if (!DIGIT1_FAR_LIVE_SOURCES.includes(source)) {
+    return emptyFarLive('source-not-live', { live: true });
+  }
+  const cropsIn = capture.crops && typeof capture.crops === 'object' ? capture.crops : null;
+  const pending = [];
+  if (cropsIn) {
+    for (const name of DIGIT1_FAR_LIVE_CROPS) {
+      if (cropsIn[name]) pending.push([name, cropsIn[name]]);
+    }
+  } else if (DIGIT1_FAR_LIVE_CROPS.includes(capture.crop)) {
+    pending.push([capture.crop, capture]);
+  }
+  if (!pending.length) return emptyFarLive('crop-not-far', { live: true });
+  const crops = {};
+  let any = false;
+  let best = null;
+  for (const [name, crop] of pending) {
+    const scored = scoreFarCrop(crop);
+    if (!scored) continue;
+    crops[name] = scored;
+    if (scored.pass) any = true;
+    if (!best || scored.mad > best.mad) best = scored;
+  }
+  if (!best) return emptyFarLive('live-msi-required', { live: true, crops });
+  return {
+    pass: any,
+    reason: any ? 'live-far' : 'below-floor',
+    live: true,
+    synthetic: false,
+    mad: best.mad,
+    grainBefore: best.grainBefore,
+    grainAfter: best.grainAfter,
+    grainDelta: best.grainDelta,
+    crops
   };
 }
