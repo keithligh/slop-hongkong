@@ -1,5 +1,5 @@
 import { HK_STREET_EYE, hkCoreProject, hkCoreUnproject } from './city-config.js';
-import { keithEyeGrain, keithEyeMad } from './digit1-far-frame.js';
+import { keithEyeGrain, keithEyeLuma, keithEyeMad } from './digit1-far-frame.js';
 
 // LandsD 3D Visualisation Map (tile-based), Cesium 3D Tiles, WGS84 ECEF.
 // The key is the example published on the CSDI API page, not a private credential.
@@ -72,6 +72,86 @@ export function resolveGroundPhotoTuning(href) {
     sharpen: read('groundSharpen', HK_GROUND_PHOTO_SHARPEN, 0, 4),
     radius: read('groundRadius', HK_GROUND_PHOTO_RADIUS, 0.5, 4)
   };
+}
+
+// ?groundTint=gsd paints each tile by its ground sample distance, ?groundTint=tile
+// by file. A diagnostic for finding the seams on a live frame, not a look.
+export function resolveGroundTint(href) {
+  let flag = '';
+  try {
+    flag = new URL(href, 'http://localhost').searchParams.get('groundTint') || '';
+  } catch {
+    flag = '';
+  }
+  return flag === 'gsd' || flag === 'tile' ? flag : '';
+}
+
+// ?groundPriority=off restores the equal-height mount of #41/#45 (no neighbour
+// precedence) for a live A-B.
+export function resolveGroundPriority(href) {
+  let flag = '';
+  try {
+    flag = new URL(href, 'http://localhost').searchParams.get('groundPriority') || '';
+  } catch {
+    flag = '';
+  }
+  return flag === 'off' || flag === '0' ? 'off' : 'finer';
+}
+
+// Where two LandsD tiles overlap on the carriageway the photographs are coplanar
+// to within a millimetre or two, so which one wins is decided triangle by
+// triangle by depth noise, and the seam between a 2 cm and a 4 cm photograph is
+// a ragged tooth edge. Each tile is moved vertically by a few millimetres per
+// centimetre of ground sample distance relative to the tile on the eye: the finer
+// photograph always owns the overlap and the eye tile does not move.
+// ?groundTint=gsd bands: tiles below each limit (cm per texel on the ground band)
+// take that colour. The hue sectors read the colour back from a tone-mapped
+// screenshot.
+export const HK_GROUND_TINT_BANDS = Object.freeze([
+  Object.freeze({ max: 1, rgb: 0xff00ff, hue: [270, 340] }),
+  Object.freeze({ max: 2.2, rgb: 0x22cc44, hue: [75, 170] }),
+  Object.freeze({ max: 3.5, rgb: 0xeedd22, hue: [46, 75] }),
+  Object.freeze({ max: 5, rgb: 0xff8800, hue: [15, 46] }),
+  Object.freeze({ max: Infinity, rgb: 0xdd2222, hue: [-20, 15] })
+]);
+
+export function groundTintBand(gsdCm) {
+  return HK_GROUND_TINT_BANDS.findIndex((band) => gsdCm < band.max);
+}
+
+export const HK_GROUND_LIFT_PER_CM = 0.004;
+export const HK_GROUND_LIFT_MAX = 0.03;
+export function groundTileLift(gsdCm, refCm) {
+  if (!(gsdCm > 0) || !(refCm > 0)) return 0;
+  const lift = (refCm - gsdCm) * HK_GROUND_LIFT_PER_CM;
+  return Math.max(-HK_GROUND_LIFT_MAX, Math.min(HK_GROUND_LIFT_MAX, lift));
+}
+
+// World size of one texel, in centimetres: sqrt(world area / (uv area x texels)).
+// Positions are the baked world vertices (metres), uvs and indices as read from the glb.
+// maxY keeps the carriageway and drops facade triangles, whose density is not the ground's.
+export function groundTileGsdCm(positions, uvs, indices, width, height, maxY = Infinity) {
+  let world = 0;
+  let uv = 0;
+  for (let k = 0; k + 2 < indices.length; k += 3) {
+    const a = indices[k] * 3;
+    const b = indices[k + 1] * 3;
+    const c = indices[k + 2] * 3;
+    if (Math.max(positions[a + 1], positions[b + 1], positions[c + 1]) > maxY) continue;
+    const ux = positions[b] - positions[a];
+    const uy = positions[b + 1] - positions[a + 1];
+    const uz = positions[b + 2] - positions[a + 2];
+    const vx = positions[c] - positions[a];
+    const vy = positions[c + 1] - positions[a + 1];
+    const vz = positions[c + 2] - positions[a + 2];
+    world += 0.5 * Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx);
+    const ia = indices[k] * 2;
+    const ib = indices[k + 1] * 2;
+    const ic = indices[k + 2] * 2;
+    uv += 0.5 * Math.abs((uvs[ib] - uvs[ia]) * (uvs[ic + 1] - uvs[ia + 1]) - (uvs[ic] - uvs[ia]) * (uvs[ib + 1] - uvs[ia + 1]));
+  }
+  const texels = uv * width * height;
+  return world > 0 && texels > 0 ? Math.sqrt(world / texels) * 100 : 0;
 }
 
 export function wgs84ToEcef(latDeg, lonDeg, height = 0) {
@@ -529,4 +609,223 @@ export function digit1GroundResiduals(capture) {
   }
   const pass = HK_GROUND_RESIDUAL_CROPS.every((name) => rows[name].pass);
   return { pass, reason: pass ? 'live-residuals' : 'residual-open', rows };
+}
+
+// Band index of a screenshot pixel of a ?groundTint=gsd frame, or -1 when the
+// pixel is not tint paint (sky, avatar, a facade).
+export function groundTintBandOfRgb(r, g, b) {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const span = max - min;
+  if (max < 0.3 || span / (max || 1) < 0.45) return -1;
+  let hue;
+  if (max === r / 255) hue = (((g - b) / 255 / span) % 6 + 6) % 6;
+  else if (max === g / 255) hue = (b - r) / 255 / span + 2;
+  else hue = (r - g) / 255 / span + 4;
+  hue *= 60;
+  if (hue > 340) hue -= 360;
+  return HK_GROUND_TINT_BANDS.findIndex((band) => hue >= band.hue[0] && hue < band.hue[1]);
+}
+
+export const HK_GROUND_TINT_DELTA = 90;
+// The carriageway and left kerb ahead of the avatar, as fractions of the frame. The
+// covered arcade on the right is silhouette, not a LOD seam.
+export const HK_GROUND_SEAM_ROI = Object.freeze({ x0: 0.15, x1: 0.52, y0: 0.75, y1: 1 });
+export const HK_GROUND_SEAM_MIN_RUN = 3;
+export const HK_GROUND_SEAM_MIN_ROWS = 20;
+export const HK_GROUND_SEAM_BAND = 14;
+export const HK_GROUND_SEAM_RAGGED_GAIN = 1;
+export const HK_GROUND_SEAM_RAGGED_CEIL = 1.2;
+export const HK_GROUND_SEAM_BAND_MAD = 0.5;
+
+// LOD seams in a ?groundTint=gsd frame, read where it differs from the photograph
+// frame of the same page (tile pixels; a facade stripe is orange in both): every place two different GSD bands meet
+// along a row, grouped by band pair. A world line is a straight line on screen, so
+// each seam is fitted x = a + b y; rmsPx is the spread of its transitions about that
+// line and teeth the transitions per row beyond the first. Two photographs fighting
+// for the same overlap give a ragged edge (rmsPx of several pixels); one owner
+// gives a line (well under a pixel).
+export const HK_GROUND_SEAM_REACH = 24;
+
+export function groundSeamLines(tint, photo, width, height, roi = HK_GROUND_SEAM_ROI) {
+  const y0 = Math.max(0, Math.floor(roi.y0 * height));
+  const y1 = Math.min(height, Math.ceil(roi.y1 * height));
+  const x0 = Math.max(0, Math.floor(roi.x0 * width));
+  const x1 = Math.min(width, Math.ceil(roi.x1 * width));
+  const tracks = [];
+  const bands = new Int8Array(x1 - x0);
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const o = (y * width + x) * 4;
+      const painted = Math.abs(tint[o] - photo[o]) + Math.abs(tint[o + 1] - photo[o + 1]) + Math.abs(tint[o + 2] - photo[o + 2]) >= HK_GROUND_TINT_DELTA;
+      bands[x - x0] = painted ? groundTintBandOfRgb(tint[o], tint[o + 1], tint[o + 2]) : -1;
+    }
+    // Runs shorter than a few pixels are anti-aliasing blends between two bands
+    // (green over orange reads yellow), not a third owner.
+    let prev = -1;
+    let start = 0;
+    while (start < bands.length) {
+      let end = start;
+      while (end < bands.length && bands[end] === bands[start]) end++;
+      const band = bands[start];
+      if (band >= 0 && end - start >= HK_GROUND_SEAM_MIN_RUN) {
+        if (prev >= 0 && band !== prev) {
+          const x = x0 + start;
+          const low = Math.min(band, prev);
+          const high = Math.max(band, prev);
+          let track = null;
+          let best = HK_GROUND_SEAM_REACH;
+          for (const candidate of tracks) {
+            if (candidate.low !== low || candidate.high !== high || y - candidate.lastY > 3) continue;
+            const gap = Math.abs(candidate.lastX - x);
+            if (gap <= best) {
+              best = gap;
+              track = candidate;
+            }
+          }
+          if (!track) {
+            track = { low, high, points: [], lastX: x, lastY: y };
+            tracks.push(track);
+          }
+          track.points.push([x, y]);
+          track.lastX = x;
+          track.lastY = y;
+        }
+        prev = band;
+      } else if (band < 0 && end - start >= HK_GROUND_SEAM_MIN_RUN) {
+        prev = -1;
+      }
+      start = end;
+    }
+  }
+  const seams = [];
+  for (const track of tracks) {
+    const rows = new Set(track.points.map((point) => point[1])).size;
+    if (rows < HK_GROUND_SEAM_MIN_ROWS) continue;
+    const byRow = new Map();
+    for (const [x, y] of track.points) {
+      const row = byRow.get(y) || { sum: 0, n: 0 };
+      row.sum += x;
+      row.n += 1;
+      byRow.set(y, row);
+    }
+    let n = 0;
+    let sy = 0;
+    let sx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (const [y, row] of byRow) {
+      const x = row.sum / row.n;
+      n += 1;
+      sy += y;
+      sx += x;
+      syy += y * y;
+      sxy += x * y;
+    }
+    const denom = n * syy - sy * sy;
+    const slope = denom ? (n * sxy - sx * sy) / denom : 0;
+    const intercept = (sx - slope * sy) / n;
+    let sq = 0;
+    for (const [x, y] of track.points) sq += (x - (intercept + slope * y)) ** 2;
+    seams.push({
+      key: `${track.low}-${track.high}`,
+      low: track.low,
+      high: track.high,
+      rows,
+      transitions: track.points.length,
+      slope,
+      intercept,
+      rmsPx: Math.sqrt(sq / track.points.length),
+      teeth: track.points.length / rows - 1
+    });
+  }
+  seams.sort((a, b) => b.rows - a.rows);
+  return seams;
+}
+
+// Pixels within half px of the fitted seam line, per row of the ROI.
+export function groundSeamBandMask(seam, width, height, roi = HK_GROUND_SEAM_ROI, half = HK_GROUND_SEAM_BAND) {
+  const mask = new Uint8Array(width * height);
+  const y0 = Math.max(0, Math.floor(roi.y0 * height));
+  const y1 = Math.min(height, Math.ceil(roi.y1 * height));
+  for (let y = y0; y < y1; y++) {
+    const centre = Math.round(seam.intercept + seam.slope * y);
+    for (let x = Math.max(0, centre - half); x <= Math.min(width - 1, centre + half); x++) mask[y * width + x] = 1;
+  }
+  return mask;
+}
+
+export function maskedMad(before, after, mask) {
+  let sum = 0;
+  let n = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (!mask[i]) continue;
+    const o = i * 4;
+    sum += (Math.abs(before[o] - after[o]) + Math.abs(before[o + 1] - after[o + 1]) + Math.abs(before[o + 2] - after[o + 2])) / 3;
+    n += 1;
+  }
+  return n ? sum / n : 0;
+}
+
+export function maskedGrain(data, width, height, mask) {
+  let sum = 0;
+  let n = 0;
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      if (!mask[y * width + x]) continue;
+      let mean = 0;
+      let meanSq = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const o = ((y + dy) * width + x + dx) * 4;
+          const luma = keithEyeLuma(data[o], data[o + 1], data[o + 2]);
+          mean += luma;
+          meanSq += luma * luma;
+        }
+      }
+      mean /= 9;
+      sum += Math.sqrt(Math.max(0, meanSq / 9 - mean * mean));
+      n += 1;
+    }
+  }
+  return n ? sum / n : 0;
+}
+
+// Cut #46 bar. A live pair of Digit1 eye frames, each as a ?groundTint=gsd frame
+// and a photograph frame (BEFORE is the same page with ?groundPriority=off, which
+// is the #45 mount). PASS needs tiles ownership, a LOD seam on the eye frame, the
+// seam's ragged edge gone (rms spread cut by a pixel and at most 1.2 px after,
+// with no teeth left) and the photograph within the seam band changed at
+// above the frame-to-frame noise of one tip (about 0.1). Soft is not SD.
+export function digit1GroundSeams(capture) {
+  const empty = { pass: false, reason: 'live-msi-required', seam: null };
+  if (!capture || capture.live !== true || capture.synthetic === true) return empty;
+  const { width, height } = capture;
+  const ownership = capture.ownership || '';
+  const photo = ownership === 'tiles' || ownership === 'infrastructure' || ownership === 'terrain';
+  const whole = new Uint8Array(width * height).fill(1);
+  const grainAfter = maskedGrain(capture.after, width, height, whole);
+  if (grainAfter < HK_GROUND_BLANK_GRAIN) return { pass: false, reason: 'blank-frame', seam: null, ownership };
+  if (!photo) return { pass: false, reason: 'ownership-open', seam: null, ownership };
+  const after = groundSeamLines(capture.afterTint, capture.after, width, height);
+  const before = groundSeamLines(capture.beforeTint, capture.before, width, height);
+  if (!after.length || !before.length) return { pass: false, reason: 'no-seam', seam: null, ownership };
+  const seam = after[0];
+  const was = before.find((entry) => entry.key === seam.key) || before[0];
+  const mask = groundSeamBandMask(seam, width, height);
+  const bandMad = maskedMad(capture.before, capture.after, mask);
+  const row = {
+    key: seam.key,
+    rows: seam.rows,
+    raggedBefore: was.rmsPx,
+    raggedAfter: seam.rmsPx,
+    teethBefore: was.teeth,
+    teethAfter: seam.teeth,
+    bandMad,
+    bandGrainBefore: maskedGrain(capture.before, width, height, mask),
+    bandGrainAfter: maskedGrain(capture.after, width, height, mask)
+  };
+  const ragged = was.rmsPx - seam.rmsPx >= HK_GROUND_SEAM_RAGGED_GAIN && seam.rmsPx <= HK_GROUND_SEAM_RAGGED_CEIL;
+  const pass = ragged && bandMad >= HK_GROUND_SEAM_BAND_MAD;
+  return { pass, reason: pass ? 'live-seam' : ragged ? 'band-below-floor' : 'seam-open', seam: row, ownership };
 }
