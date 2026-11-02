@@ -4,8 +4,22 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_STREET_EYE } from '../js/city-config.js';
+import { keithEyeGrain } from '../js/digit1-far-frame.js';
 import {
+  DIGIT1_GROUND_CROPS,
   HK_GROUND_ATTRIBUTION,
+  HK_GROUND_GRAIN_FLOOR,
+  HK_GROUND_PHOTO_MAG_FULL,
+  HK_GROUND_PHOTO_MAG_NONE,
+  HK_GROUND_PHOTO_SHARPEN,
+  HK_GROUND_RESIDUAL_CROPS,
+  catmullRomWeights,
+  cropRgba,
+  digit1GroundResiduals,
+  groundPhotoMagnification,
+  resolveGroundPhotoMode,
+  resolveGroundPhotoTuning,
+  unsharpPhotoRgba,
   HK_GROUND_DECK_NAMES,
   HK_GROUND_MAD_FLOOR,
   deckInstancesToYield,
@@ -254,4 +268,115 @@ test('published tileset leaf covers the Digit1 eye', { timeout: 40000 }, async (
     best = Math.min(best, Math.hypot(world.x - HK_STREET_EYE.x, world.z - HK_STREET_EYE.z));
   }
   assert.ok(best < 15, `nearest sampled vertex ${best.toFixed(2)} m`);
+});
+
+function photoPatch(width, height, edgeAt = 6) {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      const v = x < edgeAt ? 40 : 92;
+      data[o] = v;
+      data[o + 1] = v + 2;
+      data[o + 2] = v + 6;
+      data[o + 3] = 255;
+    }
+  }
+  return data;
+}
+
+test('Catmull-Rom weights sum to one and reproduce the texel at the centre', () => {
+  for (const f of [0, 0.25, 0.5, 0.75, 1]) {
+    const sum = catmullRomWeights(f).reduce((a, b) => a + b, 0);
+    assert.ok(Math.abs(sum - 1) < 1e-9, `f ${f} sum ${sum}`);
+  }
+  assert.deepEqual(catmullRomWeights(0).map((w) => Math.abs(w) < 1e-12 ? 0 : w), [0, 1, 0, 0]);
+  const half = catmullRomWeights(0.5);
+  assert.ok(half[0] < 0 && half[3] < 0, 'negative lobes are the sharpening');
+});
+
+test('photo reconstruction applies where the tile is magnified and fades to the plain filter', () => {
+  assert.equal(groundPhotoMagnification(0.1), 1);
+  assert.equal(groundPhotoMagnification(HK_GROUND_PHOTO_MAG_FULL), 1);
+  assert.equal(groundPhotoMagnification(HK_GROUND_PHOTO_MAG_NONE), 0);
+  assert.equal(groundPhotoMagnification(4), 0);
+  assert.equal(groundPhotoMagnification(NaN), 0);
+  const mid = groundPhotoMagnification((HK_GROUND_PHOTO_MAG_FULL + HK_GROUND_PHOTO_MAG_NONE) / 2);
+  assert.ok(mid > 0.4 && mid < 0.6);
+});
+
+test('unsharp uses only the photograph: flat ground stays flat, an edge gains grain', () => {
+  const width = 16;
+  const height = 12;
+  const flat = new Uint8ClampedArray(width * height * 4);
+  for (let i = 0; i < flat.length; i += 4) {
+    flat[i] = 50;
+    flat[i + 1] = 52;
+    flat[i + 2] = 56;
+    flat[i + 3] = 255;
+  }
+  assert.deepEqual(Array.from(unsharpPhotoRgba(flat, width, height)), Array.from(flat));
+  const edge = photoPatch(width, height);
+  const sharp = unsharpPhotoRgba(edge, width, height, HK_GROUND_PHOTO_SHARPEN);
+  assert.ok(keithEyeGrain(sharp, width, height) > keithEyeGrain(edge, width, height));
+  const far = [0, 1, 2, 3].map((x) => sharp[x * 4]);
+  assert.equal(far[0], 40, 'texels away from the edge are untouched');
+});
+
+test('ground photo shader samples only the tile and invents no noise', () => {
+  const photo = read('js/hk-ground-photo.js');
+  const page = read('js/hk-ground-tiles.js');
+  assert.match(photo, /hkGroundTilePhoto/);
+  assert.match(photo, /MeshBasicNodeMaterial/);
+  assert.match(photo, /dFdx/);
+  assert.match(photo, /texture\(map/);
+  assert.doesNotMatch(photo, /noise|hash|random|\bsin\(|grit|megascans|mapillary/i);
+  assert.match(page, /createGroundPhotoMaterial/);
+  assert.match(page, /resolveGroundPhotoMode/);
+  assert.match(page, /MeshBasicMaterial/);
+  assert.match(page, /landsd-3dtiles/);
+  assert.equal(resolveGroundPhotoMode('http://localhost/?groundPhoto=plain'), 'plain');
+  assert.equal(resolveGroundPhotoMode('http://localhost/'), 'reconstruct');
+  assert.deepEqual(resolveGroundPhotoTuning('http://localhost/'), { sharpen: HK_GROUND_PHOTO_SHARPEN, radius: 1.5 });
+  assert.equal(resolveGroundPhotoTuning('http://localhost/?groundSharpen=99').sharpen, 4);
+  assert.equal(resolveGroundPhotoTuning('http://localhost/?groundSharpen=x').sharpen, HK_GROUND_PHOTO_SHARPEN);
+});
+
+test('Digit1 ground crops are inside the frame and cropRgba cuts them', () => {
+  for (const name of HK_GROUND_RESIDUAL_CROPS) assert.ok(DIGIT1_GROUND_CROPS[name], name);
+  for (const rect of Object.values(DIGIT1_GROUND_CROPS)) {
+    assert.ok(rect.x0 >= 0 && rect.x1 <= 1 && rect.x0 < rect.x1);
+    assert.ok(rect.y0 >= 0 && rect.y1 <= 1 && rect.y0 < rect.y1);
+  }
+  const frame = photoPatch(100, 50);
+  const cut = cropRgba(frame, 100, 50, { x0: 0.5, x1: 0.75, y0: 0.2, y1: 0.6 });
+  assert.equal(cut.width, 25);
+  assert.equal(cut.height, 20);
+  assert.equal(cut.data[0], 92);
+});
+
+test('a blank AFTER frame is not a ground crop', () => {
+  const { before, width, height } = crops();
+  const blank = new Uint8ClampedArray(before.length);
+  for (let i = 3; i < blank.length; i += 4) blank[i] = 255;
+  const row = digit1GroundOwnership({ live: true, ownership: 'tiles', before, after: blank, width, height });
+  assert.equal(row.pass, false);
+  assert.equal(row.reason, 'blank-frame');
+});
+
+test('Cut #45 residual bar needs live right-kerb AND underfoot floors', () => {
+  const { before, after, width, height } = crops();
+  const pair = { before, after, width, height };
+  const both = digit1GroundResiduals({ live: true, ownership: 'tiles', crops: { 'right-kerb': pair, underfoot: pair } });
+  assert.equal(both.pass, true);
+  assert.equal(both.reason, 'live-residuals');
+  const one = digit1GroundResiduals({ live: true, ownership: 'tiles', crops: { 'right-kerb': pair } });
+  assert.equal(one.pass, false);
+  assert.equal(one.rows.underfoot.reason, 'crop-missing');
+  const quiet = { before, after: new Uint8ClampedArray(before), width, height };
+  assert.equal(digit1GroundResiduals({ live: true, ownership: 'tiles', crops: { 'right-kerb': pair, underfoot: quiet } }).pass, false);
+  assert.equal(digit1GroundResiduals({ live: false, ownership: 'tiles', crops: { 'right-kerb': pair, underfoot: pair } }).pass, false);
+  assert.equal(digit1GroundResiduals({ live: true, synthetic: true, ownership: 'tiles', crops: { 'right-kerb': pair, underfoot: pair } }).pass, false);
+  assert.equal(digit1GroundResiduals({ live: true, ownership: 'procedural', crops: { 'right-kerb': pair, underfoot: pair } }).pass, false);
+  assert.equal(HK_GROUND_GRAIN_FLOOR, 0.35);
 });

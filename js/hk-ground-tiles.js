@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { HK_STREET_EYE } from './city-config.js';
+import { createGroundPhotoMaterial } from './hk-ground-photo.js';
 import {
   HK_GROUND_ATTRIBUTION,
   HK_GROUND_BASIS_PATH,
@@ -13,6 +14,8 @@ import {
   groundSnapOffset,
   parseB3dm,
   readGlbMesh,
+  resolveGroundPhotoMode,
+  resolveGroundPhotoTuning,
   resolveGroundTilesRequest,
   selectDigit1GroundTiles,
   tileTriangleYieldsToBuilding
@@ -31,7 +34,7 @@ function parseKtx2(loader, bytes) {
   });
 }
 
-function bakeMesh(mesh, matrix, rtc, map) {
+function bakeMesh(mesh, matrix, rtc, map, mode, tuning) {
   const geometry = new THREE.BufferGeometry();
   const positions = new Float32Array(mesh.positions.length);
   for (let i = 0; i < mesh.positions.length; i += 3) {
@@ -47,14 +50,16 @@ function bakeMesh(mesh, matrix, rtc, map) {
   map.colorSpace = THREE.SRGBColorSpace;
   map.flipY = false;
   map.needsUpdate = true;
-  const material = new THREE.MeshBasicMaterial({
-    map,
-    color: 0xffffff,
-    side: THREE.DoubleSide,
-    alphaTest: 0.5,
-    depthWrite: true
-  });
-  material.name = 'hkGroundTilePhoto';
+  const material = mode === 'plain'
+    ? new THREE.MeshBasicMaterial({
+      map,
+      color: 0xffffff,
+      side: THREE.DoubleSide,
+      alphaTest: 0.5,
+      depthWrite: true
+    })
+    : createGroundPhotoMaterial(map, map.image?.width || 1, map.image?.height || 1, tuning);
+  if (mode === 'plain') material.name = 'hkGroundTilePhoto';
   material.polygonOffset = true;
   material.polygonOffsetFactor = 1;
   material.polygonOffsetUnits = 1;
@@ -173,6 +178,8 @@ export async function mountHkGroundTiles(scene, renderer, {
     console.warn('[ground-tiles] no tile covers the Digit1 disc');
     return emptyMount();
   }
+  const photoMode = resolveGroundPhotoMode(href || 'http://localhost/');
+  const tuning = resolveGroundPhotoTuning(href || 'http://localhost/');
   const ktx2 = new KTX2Loader();
   ktx2.setTranscoderPath(HK_GROUND_BASIS_PATH);
   try {
@@ -202,7 +209,7 @@ export async function mountHkGroundTiles(scene, renderer, {
       }
       const map = await parseKtx2(ktx2, decoded.ktx2);
       pending.push({
-        ...bakeMesh(decoded, item.tile.matrix, packed.feature.RTC_CENTER || null, map),
+        ...bakeMesh(decoded, item.tile.matrix, packed.feature.RTC_CENTER || null, map, photoMode, tuning),
         file: name
       });
     } catch (err) {

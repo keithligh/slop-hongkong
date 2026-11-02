@@ -17,6 +17,7 @@ export const HK_GROUND_CHART_CLEARANCE = 1.8;
 export const HK_GROUND_SAMPLE_RADIUS = 8;
 export const HK_GROUND_MAD_FLOOR = 6;
 export const HK_GROUND_GRAIN_FLOOR = 0.35;
+export const HK_GROUND_BLANK_GRAIN = 0.05;
 export const HK_GROUND_ATTRIBUTION = '© Government of the Hong Kong SAR (Lands Department) / CSDI 3D Visualisation Map (tile-based) / Open3Dhk (https://3d.map.gov.hk/)';
 
 export const HK_GROUND_DECK_NAMES = Object.freeze([
@@ -41,6 +42,36 @@ export function resolveGroundTilesRequest(href) {
   }
   if (flag === 'off' || flag === '0') return null;
   return { enabled: true };
+}
+
+// ?groundPhoto=plain keeps the bilinear MeshBasicMaterial read for a live A-B
+// against the reconstructed read. Default is the reconstruction.
+export function resolveGroundPhotoMode(href) {
+  let flag = '';
+  try {
+    flag = new URL(href, 'http://localhost').searchParams.get('groundPhoto') || '';
+  } catch {
+    flag = '';
+  }
+  return flag === 'plain' ? 'plain' : 'reconstruct';
+}
+
+export function resolveGroundPhotoTuning(href) {
+  let params;
+  try {
+    params = new URL(href, 'http://localhost').searchParams;
+  } catch {
+    params = new URLSearchParams();
+  }
+  const read = (key, fallback, lo, hi) => {
+    const raw = params.get(key);
+    const value = raw == null || raw === '' ? NaN : Number(raw);
+    return Number.isFinite(value) ? Math.min(hi, Math.max(lo, value)) : fallback;
+  };
+  return {
+    sharpen: read('groundSharpen', HK_GROUND_PHOTO_SHARPEN, 0, 4),
+    radius: read('groundRadius', HK_GROUND_PHOTO_RADIUS, 0.5, 4)
+  };
 }
 
 export function wgs84ToEcef(latDeg, lonDeg, height = 0) {
@@ -389,9 +420,113 @@ export function digit1GroundOwnership(capture) {
   const grainAfter = keithEyeGrain(capture.after, width, height);
   const grainDelta = grainAfter - grainBefore;
   const ownership = capture.ownership || '';
+  // A flat AFTER that still differs from BEFORE (the page drew nothing, or a
+  // screenshot raced the swapchain) is not a ground crop.
+  if (grainAfter < HK_GROUND_BLANK_GRAIN && mad >= HK_GROUND_MAD_FLOOR) {
+    return { pass: false, reason: 'blank-frame', mad, grainBefore, grainAfter, grainDelta, ownership };
+  }
   const photo = ownership === 'tiles' || ownership === 'infrastructure' || ownership === 'terrain';
   const base = { mad, grainBefore, grainAfter, grainDelta, ownership };
   if (!photo) return { pass: false, reason: 'ownership-open', ...base };
   const pass = mad >= HK_GROUND_MAD_FLOOR && Math.abs(grainDelta) >= HK_GROUND_GRAIN_FLOOR;
   return { pass, reason: pass ? 'live-ground' : 'below-floor', ...base };
+}
+
+// Digit1-eye ground crops as fractions of the presented frame. Right-kerb is the
+// north sidewalk and kerb line right of the avatar. Underfoot is the carriageway
+// and kerb edge at the avatar's feet, left of its legs. Fractions keep the
+// crops comparable between a 1280-wide headless frame and the MSI window.
+export const DIGIT1_GROUND_CROPS = Object.freeze({
+  'road-ahead': Object.freeze({ x0: 0.42, x1: 0.56, y0: 0.62, y1: 0.70 }),
+  'south-kerb': Object.freeze({ x0: 0.06, x1: 0.30, y0: 0.74, y1: 0.94 }),
+  'right-kerb': Object.freeze({ x0: 0.56, x1: 0.78, y0: 0.76, y1: 0.97 }),
+  underfoot: Object.freeze({ x0: 0.34, x1: 0.46, y0: 0.82, y1: 0.99 })
+});
+
+export function cropRgba(data, width, height, rect) {
+  const x0 = Math.max(0, Math.floor(rect.x0 * width));
+  const x1 = Math.min(width, Math.ceil(rect.x1 * width));
+  const y0 = Math.max(0, Math.floor(rect.y0 * height));
+  const y1 = Math.min(height, Math.ceil(rect.y1 * height));
+  const w = Math.max(0, x1 - x0);
+  const h = Math.max(0, y1 - y0);
+  const out = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const src = ((y0 + y) * width + x0 + x) * 4;
+      const dst = (y * w + x) * 4;
+      out[dst] = data[src];
+      out[dst + 1] = data[src + 1];
+      out[dst + 2] = data[src + 2];
+      out[dst + 3] = 255;
+    }
+  }
+  return { data: out, width: w, height: h };
+}
+
+// Catmull-Rom reconstruction weights for a sample at fractional texel offset f.
+// The photograph is magnified 10-20x underfoot (2 cm per texel on the eye tile
+// against about 1.4 mm per pixel at the avatar's feet). Bilinear reads that as
+// a smeared ramp between texel centres. These are the weights the shader uses.
+export function catmullRomWeights(f) {
+  const f2 = f * f;
+  const f3 = f2 * f;
+  return [
+    -0.5 * f3 + f2 - 0.5 * f,
+    1.5 * f3 - 2.5 * f2 + 1,
+    -1.5 * f3 + 2 * f2 + 0.5 * f,
+    0.5 * f3 - 0.5 * f2
+  ];
+}
+
+// Texels per screen pixel is the footprint the sampler sees. The reconstruction
+// and the unsharp gain are full where the photograph is magnified and fade out
+// by one texel per pixel, so minified ground keeps the plain filter.
+export const HK_GROUND_PHOTO_MAG_FULL = 0.5;
+export const HK_GROUND_PHOTO_MAG_NONE = 1;
+export const HK_GROUND_PHOTO_SHARPEN = 2.5;
+export const HK_GROUND_PHOTO_RADIUS = 1.5;
+
+export function groundPhotoMagnification(texelsPerPixel) {
+  if (!Number.isFinite(texelsPerPixel) || texelsPerPixel < 0) return 0;
+  const t = (texelsPerPixel - HK_GROUND_PHOTO_MAG_FULL) / (HK_GROUND_PHOTO_MAG_NONE - HK_GROUND_PHOTO_MAG_FULL);
+  const x = Math.min(1, Math.max(0, t));
+  return 1 - x * x * (3 - 2 * x);
+}
+
+// CPU twin of the shader's sharpen: the photograph's own texel minus the mean
+// of its four neighbours, added back with a gain. A flat patch has no detail,
+// so it stays flat. This does not add noise.
+export function unsharpPhotoRgba(data, width, height, gain = HK_GROUND_PHOTO_SHARPEN) {
+  const out = new Uint8ClampedArray(data.length);
+  const at = (x, y, k) => data[(Math.min(height - 1, Math.max(0, y)) * width + Math.min(width - 1, Math.max(0, x))) * 4 + k];
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const o = (y * width + x) * 4;
+      for (let k = 0; k < 3; k++) {
+        const c = data[o + k];
+        const mean = (at(x - 1, y, k) + at(x + 1, y, k) + at(x, y - 1, k) + at(x, y + 1, k)) / 4;
+        out[o + k] = c + gain * (c - mean);
+      }
+      out[o + 3] = data[o + 3];
+    }
+  }
+  return out;
+}
+
+export const HK_GROUND_RESIDUAL_CROPS = Object.freeze(['right-kerb', 'underfoot']);
+
+// Cut #45 bar: the #41 residual crops. Both must clear digit1GroundOwnership on
+// a live pair. One crop passing, a missing crop, or a painted buffer is a fail.
+export function digit1GroundResiduals(capture) {
+  const rows = {};
+  const live = capture?.live === true && capture?.synthetic !== true;
+  for (const name of HK_GROUND_RESIDUAL_CROPS) {
+    const crop = capture?.crops?.[name];
+    rows[name] = crop
+      ? digit1GroundOwnership({ ...crop, live, ownership: crop.ownership || capture.ownership })
+      : { pass: false, reason: 'crop-missing', mad: 0, grainDelta: 0 };
+  }
+  const pass = HK_GROUND_RESIDUAL_CROPS.every((name) => rows[name].pass);
+  return { pass, reason: pass ? 'live-residuals' : 'residual-open', rows };
 }
