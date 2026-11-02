@@ -21,7 +21,7 @@ import {
   hkResolveLandmarks
 } from '../js/city-config.js';
 import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
-import { measureDigit1FarFrame } from '../js/digit1-far-frame.js';
+import { digit1FarFrameFidelity, measureDigit1FarFrame } from '../js/digit1-far-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -68,6 +68,7 @@ import {
   plandCarriageDistance,
   plandOmitsCarriageShell,
   plandOmitsDigit1BocPlate,
+  plandOmitsDigit1FarNdc,
   plandOmitsDigit1FlankChart,
   plandOmitsDigit1LookGround,
   plandOmitsDigit1MidbandPlate,
@@ -759,13 +760,11 @@ export function digit1OnEyeAtlasFidelity(sources) {
   return true;
 }
 
-// Primary bar for Cut #39. The Digit1 eye frames past the 72 m corridor, and a
-// null-fill omit on a chase mesh past 200 m is a hole onto the 2017 aerial.
-// The crop is that eye: curtain MAD and seal MAD are measured RGB deltas, and
-// grain is hp_std_3x3. A source-string check alone does not pass. Soft PlanD
-// at the waived low samples stays. Henderson's interior is not punched.
+// Policy fixture for the Cut #39 curtain and far-chase seal. The painted
+// buffer proves those code paths still move pixels. It does not set Soft PASS.
+// Soft PlanD at the waived low samples stays. Henderson's interior is not punched.
 // Mid-band photo stays an open residual. This is not a Sleeping Dogs claim.
-export function digit1FarFrameFidelity(sources) {
+export function digit1FarFramePolicy(sources) {
   const eye = measureDigit1FarFrame();
   if (!(eye.along > 200)) return false;
   if (!(eye.side > eye.corridorHalf)) return false;
@@ -791,6 +790,27 @@ export function digit1FarFrameFidelity(sources) {
   if (!/far-frame seal/.test(page)) return false;
   if (!/digit1EyeFrameHalf\(frame\.along, half\)/.test(ground)) return false;
   if (!/frameEye === false \? half : digit1EyeFrameHalf/.test(ground)) return false;
+  return true;
+}
+
+// Lippo Centre, the published chase box. centre_midfar and henderson_face
+// first-hit tile_22_26 on this footprint. Fairmont House is the waived ~300 m sample.
+const LIPPO = { minX: 341, maxX: 384, minZ: 135, maxZ: 178, minH: 5, maxH: 186 };
+const FAIRMONT = { minX: 278, maxX: 316, minZ: 86, maxZ: 121, minH: 5, maxH: 160 };
+
+export function digit1FarNdcOwned(sources) {
+  const midfar = { x: 341.83, y: 54.78, z: 158.31 };
+  const face = { x: 351.38, y: 59.4, z: 138.9 };
+  if (plandOmitsDigit1FarNdc(midfar, [LIPPO]) !== true) return false;
+  if (plandOmitsDigit1FarNdc(face, [LIPPO]) !== true) return false;
+  if (plandOmitsDigit1FlankChart(midfar, [LIPPO]) !== false) return false;
+  if (plandOmitsDigit1LookGround({ x: 278.49, y: 15.44, z: 110.37 }) !== false) return false;
+  if (plandOmitsDigit1FarNdc({ x: 278.49, y: 15.44, z: 110.37 }, [FAIRMONT]) !== false) return false;
+  if (plandOmitsDigit1FarNdc({ x: 230, y: 40, z: 80 }, [HENDERSON]) !== false) return false;
+  if (plandOmitsDigit1FarNdc({ ...midfar, y: PLAND_FLANK_TOP }, [LIPPO]) !== false) return false;
+  const page = sources?.pland || '';
+  if (!/plandOmitsDigit1FarNdc\(mid, boxes\)/.test(page)) return false;
+  if (!/Digit1 far NDC in front of a sealed LandsD facade/.test(page)) return false;
   return true;
 }
 
@@ -832,6 +852,7 @@ export function readDigit1Sources(root) {
 export function digit1InvaderGate(root) {
   const sources = readDigit1Sources(root);
   const plan = withPlandCorridorHidden({ hiddenIds: new Set() }, BLOCKS);
+  const farLive = digit1FarFrameFidelity();
   const bars = {
     eye: '?at=-1.4,29.3,1.29',
     noAshlarInvaderSlabs: noAshlarInvaderSlabs(sources, plan),
@@ -853,7 +874,10 @@ export function digit1InvaderGate(root) {
     digit1PhotoFidelity: digit1PhotoFidelity(sources),
     digit1PhotoAtlasFidelity: digit1PhotoAtlasFidelity(sources),
     digit1OnEyeAtlasFidelity: digit1OnEyeAtlasFidelity(sources),
-    digit1FarFrameFidelity: digit1FarFrameFidelity(sources),
+    digit1FarFramePolicy: digit1FarFramePolicy(sources),
+    digit1FarNdcOwned: digit1FarNdcOwned(sources),
+    digit1FarFrameFidelity: farLive.pass,
+    digit1FarFrameFidelityReason: farLive.reason,
     digit1MidbandPhotoFidelity: digit1MidbandPhotoFidelity(sources)
   };
   // #22–#37 holds. The mid-band photograph is an open residual until a BUILDING
@@ -877,7 +901,9 @@ export function digit1InvaderGate(root) {
     && bars.digit1PhotoFidelity === true
     && bars.digit1PhotoAtlasFidelity === true
     && bars.digit1OnEyeAtlasFidelity === true
-    && bars.digit1FarFrameFidelity === true
+    && bars.digit1FarFramePolicy === true
+    && bars.digit1FarNdcOwned === true
+    && bars.digit1FarFrameFidelity !== true
     && !/NULL_FILL_EDGE = 256/.test(sources.gltf);
   const openResiduals = [];
   if (bars.digit1MidbandPhotoFidelity !== true) openResiduals.push('digit1MidbandPhotoFidelity');

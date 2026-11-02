@@ -75,6 +75,14 @@ export const PLAND_FLANK_PROUD = 4;
 export const PLAND_FLANK_FACE = 6;
 export const PLAND_FLANK_TOP = 64;
 export const PLAND_FLANK_EYE_BOX = 12;
+// Far look-corridor, past Fairmont House. The flank yield stops at along 216 m,
+// short of The Henderson (near edge ~217 m). Lippo Centre's closest point is
+// ~358 m, so tile_22_26 still first-hits centre_midfar and henderson_face,
+// about 0.2 m in front of sealed B348641561601063A0. 320 m is past Fairmont
+// (~285 m) and short of Lippo, so the waived centre_low sample stays.
+// The pad is that measured skin, not the 4 m flank proud.
+export const PLAND_FAR_NDC_PAST = 320;
+export const PLAND_FAR_NDC_PAD = 1;
 // Digit1 mid-band. The eye hits at ~(84.9, 14.7, 77.3), ~(80.9, 18.3, 71.1),
 // and ~(141.2, 21.6, 44.1) are not on a LandsD ring and not on a mounted
 // BUILDING chart. The right cluster is the gap east of the Bank of China
@@ -814,6 +822,35 @@ export function plandOmitsDigit1FlankChart(point, boxes, {
     const onLook = Math.abs(lookAxisDot(inset.ox, inset.oz, fx, fz)) > 0.5;
     const onEye = eyeOutwardDot(inset.ox, inset.oz, eyeX, eyeZ, box, point) > 0.5;
     if (onLook || onEye) return true;
+  }
+  return false;
+}
+
+// Donor mount. centre_midfar and henderson_face still first-hit tile_22_26
+// on the Lippo Centre face. The flank yield never sees that box: its near
+// edge is past along 216 m. Drop a centroid below the canyon top when it
+// sits in, or within a metre of, a street-chase LandsD box whose closest
+// point is past Fairmont House. The Henderson interior and the waived
+// centre_low / apron samples are closer than that and stay.
+export function plandOmitsDigit1FarNdc(point, boxes, {
+  eye = HK_STREET_EYE,
+  past = PLAND_FAR_NDC_PAST,
+  pad = PLAND_FAR_NDC_PAD,
+  top = PLAND_FLANK_TOP,
+  sidewalk = ISLAND_BOUNDS.sidewalkHeight
+} = {}) {
+  if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) return false;
+  if (!(point.y < top)) return false;
+  const band = Number.isFinite(pad) && pad > 0 ? pad : 0;
+  const reach = Number.isFinite(past) ? past : PLAND_FAR_NDC_PAST;
+  for (const box of boxes || []) {
+    if (!finiteBox(box)) continue;
+    if (!gltfInStreetChase(box, eye)) continue;
+    if (!(boxClosestDistance(box, eye) > reach)) continue;
+    if (point.y > chartRoofY(box, sidewalk)) continue;
+    if (point.x < box.minX - band || point.x > box.maxX + band) continue;
+    if (point.z < box.minZ - band || point.z > box.maxZ + band) continue;
+    return true;
   }
   return false;
 }
