@@ -12,6 +12,7 @@ import { mountHkGltfBuildings, prepareHkGltfSheet, setLandsdAnisotropyLimit } fr
 import { DIGIT1_PROBE_SAMPLES, isPaleRgb, ndcToReadPixel, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
 import { runDigit1Probe } from './digit1-probe.js';
 import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
+import { mountHkGroundTiles } from './hk-ground-tiles.js';
 import { buildStreetDetails } from './street-details.js';
 import { createTrafficSystem, createHighwayTraffic } from './traffic.js';
 import { buildRoadPaint } from './road-paint.js';
@@ -130,6 +131,19 @@ async function initApp() {
     if (plandPlan.capture) plandCredit.title = plandPlan.capture;
   }
   markInit('pland');
+  if (loadingStatus) loadingStatus.textContent = '正在載入地政總署三維實景地面…';
+  const groundMount = await mountHkGroundTiles(scene, renderer, {
+    href: window.location.href,
+    cityGroup: cityGrid.group,
+    buildings: plandPlan?.mode === 'compare' ? [] : (gltfPlan?.selected || [])
+  });
+  const groundCredit = document.getElementById('hud-ground-credit');
+  if (groundCredit && groundMount.loaded > 0) {
+    groundCredit.hidden = false;
+    groundCredit.textContent = '地面 © 香港特別行政區政府地政總署 / CSDI / Open3Dhk';
+    groundCredit.title = groundMount.attribution;
+  }
+  markInit('groundTiles');
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...gltfBuildings.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
 
   const streetDetails = buildStreetDetails(scene, gltfPlan);

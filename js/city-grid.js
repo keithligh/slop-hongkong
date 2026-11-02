@@ -132,6 +132,7 @@ function addHkRibbonMesh(group, mat, segs, y, height, name, renderOrder = 0) {
     mesh.setMatrixAt(i, dummy.matrix);
   }
   mesh.instanceMatrix.needsUpdate = true;
+  mesh.userData.hkCentres = segs.map((s) => ({ x: s.x, z: s.z }));
   const span = new Float32Array(segs.length * 2);
   for (let i = 0; i < segs.length; i++) {
     span[i * 2] = segs[i].w;

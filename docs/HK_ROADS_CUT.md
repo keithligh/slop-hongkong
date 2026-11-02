@@ -51,3 +51,4 @@ Chater, two-way, is the double yellow. A point on it is about **x = 24, z = −6
 - Parallel centrelines more than about half the combined width apart stay separate streets. A real median narrower than that becomes one asphalt surface.
 - Wetness is the shader's existing rain film and puddle mask. There are no mesh puddles, reflections unique to Central, or per-street drainage.
 - Outside Central there is asphalt and sidewalk, but no curb mesh and no lane paint.
+- The asphalt shader no longer draws cast-iron manhole lids. Under the Digit1 eye the carriageway, kerb, and near sidewalk yield to LandsD tile-based photo mesh where that mesh loads. See [HK_GROUND_TILES_CUT.md](HK_GROUND_TILES_CUT.md).
