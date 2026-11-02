@@ -25,8 +25,10 @@ import {
   landsdChartWrap,
   landsdDilateGutter,
   packLandsdChartBins,
+  landsdFarGrainMaxLod,
   landsdGutterFraction,
   landsdGutterMip,
+  landsdLimitMipChain,
   landsdNullFillTriangles,
   nullFillSampleSize,
   planGltfManifest,
@@ -244,6 +246,33 @@ function uploadGutterMips(tex, pixels, anisotropy) {
   return true;
 }
 
+// Far chase only. The chain stops at maxLod so the GPU clamps there instead of
+// sampling the mip that has already averaged the facade grain away. Fewer than
+// four levels is refused: that is the two-level alias, and a one-level chain
+// is the brown patch under an anisotropic lookup.
+function uploadFarGrainMips(tex, pixels, anisotropy, maxLod) {
+  const cap = maxLod | 0;
+  if (!(cap >= 3)) return false;
+  const levels = landsdLimitMipChain(pixels.data, pixels.width, pixels.height, cap);
+  if (!levels || levels.length < cap + 1) return false;
+  const images = [];
+  for (const level of levels) {
+    const canvas = canvasFromPixels(level.data, level.width, level.height);
+    if (!canvas) return false;
+    images.push(canvas);
+  }
+  tex.image = images[0];
+  tex.mipmaps = images;
+  tex.generateMipmaps = false;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.anisotropy = anisotropy;
+  tex.userData.hkChartMips = true;
+  tex.userData.hkFullRes = true;
+  tex.userData.hkFarGrainMaxLod = cap;
+  tex.needsUpdate = true;
+  return true;
+}
+
 function uploadChaseMips(tex, sampler, wrap) {
   if (tex.userData?.hkChartMips) return;
   const aniso = clampLandsdAnisotropy(sampler.anisotropy, anisotropyLimit);
@@ -252,6 +281,14 @@ function uploadChaseMips(tex, sampler, wrap) {
   tex.wrapT = tex.wrapS;
   tex.flipY = false;
   tex.anisotropy = aniso;
+  if (Number.isFinite(sampler.farGrainMaxLod)) {
+    const pixels = readImagePixels(tex.image);
+    const edge = pixels ? Math.max(pixels.width, pixels.height) : 0;
+    const maxLod = pixels && Number.isFinite(sampler.farGrainDistance)
+      ? landsdFarGrainMaxLod(sampler.farGrainDistance, sampler.farGrainFace, edge)
+      : null;
+    if (pixels && Number.isFinite(maxLod) && uploadFarGrainMips(tex, pixels, aniso, maxLod)) return;
+  }
   const pixels = readImagePixels(tex.image);
   const gutter = pixels ? landsdGutterFraction(pixels.data, pixels.width, pixels.height, 4) : 0;
   if (pixels && gutter >= GUTTER_MIP_FRACTION && uploadGutterMips(tex, pixels, aniso)) return;
@@ -877,6 +914,15 @@ export async function mountHkGltfBuildings(scene, plan) {
       let nullDropped = 0;
       let farSealed = 0;
       const farChase = landsdFarChaseMesh(entry);
+      const farSampler = gltfAlbedoSampler(entry);
+      let farGrainLod = null;
+      const noteFarGrain = (material) => {
+        const list = Array.isArray(material) ? material : [material];
+        for (const mat of list) {
+          const lod = mat?.map?.userData?.hkFarGrainMaxLod;
+          if (Number.isFinite(lod)) farGrainLod = lod;
+        }
+      };
       gltf.scene.traverse((obj) => {
         if (!obj.isMesh) return;
         const geo = bakeMesh(obj);
@@ -894,7 +940,7 @@ export async function mountHkGltfBuildings(scene, plan) {
           geo.dispose();
           return;
         }
-        const sampler = gltfAlbedoSampler(entry);
+        const sampler = farSampler;
         const placeMesh = (partGeo, material) => {
           const mesh = new THREE.Mesh(partGeo, material);
           mesh.name = 'HkGltfBuilding';
@@ -912,6 +958,7 @@ export async function mountHkGltfBuildings(scene, plan) {
         if (!pieces) {
           packLandsdChart(geo, obj.material, sampler);
           sharpenPhoto(obj.material, sampler);
+          noteFarGrain(obj.material);
           placeMesh(geo, obj.material);
         } else {
           // Atlas UVs already sit inside the replicated pad. A second crop
@@ -922,10 +969,14 @@ export async function mountHkGltfBuildings(scene, plan) {
           for (const piece of pieces) {
             if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
             sharpenPhoto(piece.material, sampler);
+            noteFarGrain(piece.material);
             placeMesh(piece.geo, piece.material);
           }
         }
       });
+      if (Number.isFinite(farGrainLod)) {
+        console.info(`[gltf] far-grain mip ${entry.file || entry.url} maxLod ${farGrainLod}`);
+      }
       if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
       if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
       if (!meshes) throw new Error('no meshes');
