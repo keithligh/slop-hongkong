@@ -37,10 +37,25 @@
     const result = await mountHkGroundTiles(scene, renderer, { href: location.href });
     let textured = 0;
     let nearest = Infinity;
+    const maps = [];
     scene.traverse((obj) => {
       if (!obj.isMesh) return;
       const image = obj.material?.map?.image;
       if (image && (image.width || image.displayWidth)) textured += 1;
+      const map = obj.material?.map;
+      if (map) {
+        maps.push({
+          file: obj.userData.hkFile,
+          w: image?.width || image?.displayWidth || 0,
+          h: image?.height || image?.displayHeight || 0,
+          mips: map.mipmaps?.length || 0,
+          min: map.minFilter,
+          mag: map.magFilter,
+          aniso: map.anisotropy,
+          fmt: map.format,
+          compressed: !!map.isCompressedTexture
+        });
+      }
       const position = obj.geometry?.attributes?.position;
       if (!position) return;
       for (let i = 0; i < position.count; i += 40) {
@@ -56,7 +71,8 @@
       snap: result.snap,
       triangles: result.triangles,
       textured,
-      nearest: Number.isFinite(nearest) ? nearest : null
+      nearest: Number.isFinite(nearest) ? nearest : null,
+      maps: maps.slice(0, 6)
     });
   </script>
 </body>

@@ -2,6 +2,9 @@
 // One Des Voeux eye-east frame after the loading overlay drops.
 //   node tools/digit1-eye-shot.mjs artifacts/eye-east.png
 //   node tools/digit1-eye-shot.mjs artifacts/eye-east.png --query 'at=-1.4,29.3,1.29&landsdAniso=1'
+//   node tools/digit1-eye-shot.mjs before.png --root /tmp/before --hide-hud
+// --root serves another checkout (the BEFORE tip of a live A-B). --hide-hud
+// drops the DOM panels so a ground crop scores the scene, not the HUD.
 
 import { createReadStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
@@ -9,7 +12,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
+const repoRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CHROME = process.env.CHROME || 'google-chrome';
 
 function argValue(flag) {
@@ -17,6 +20,8 @@ function argValue(flag) {
   if (index < 0) return '';
   return process.argv[index + 1] || '';
 }
+
+const root = argValue('--root') ? path.resolve(argValue('--root')) : repoRoot;
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -82,11 +87,11 @@ function chromeArgs(port) {
 }
 
 async function main() {
-  const dest = path.resolve(root, process.argv[2] || 'artifacts/eye-east.png');
+  const dest = path.resolve(repoRoot, process.argv[2] || 'artifacts/eye-east.png');
   const query = argValue('--query') || 'at=-1.4,29.3,1.29';
   const server = await startServer();
   const pageUrl = `http://127.0.0.1:${server.address().port}/index.html?${query}`;
-  const chrome = spawn(CHROME, chromeArgs(9224), { stdio: 'ignore' });
+  const chrome = spawn(CHROME, chromeArgs(9224), { stdio: 'ignore', detached: true });
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   try {
     let list = null;
@@ -112,6 +117,10 @@ async function main() {
     const pending = new Map();
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
+      if (message.method === 'Runtime.consoleAPICalled') {
+        const text = (message.params.args || []).map((arg) => arg.value ?? arg.description ?? '').join(' ');
+        if (/\[(ground-tiles|gltf|pland)\]/.test(text)) console.log(`[page] ${text}`);
+      }
       if (message.id && pending.has(message.id)) {
         pending.get(message.id)(message);
         pending.delete(message.id);
@@ -140,6 +149,15 @@ async function main() {
       if (!ready) await sleep(400);
     }
     if (!ready) throw new Error('eye frame did not leave the loading overlay');
+    if (process.argv.includes('--hide-hud')) {
+      await send('Runtime.evaluate', {
+        expression: `(() => {
+          const style = document.createElement('style');
+          style.textContent = 'body > *:not(main):not(script):not(style) { display: none !important; }';
+          document.head.appendChild(style);
+        })()`
+      });
+    }
     await sleep(1500);
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(shot.result.data, 'base64');
@@ -147,7 +165,11 @@ async function main() {
     writeFileSync(dest, png);
     console.log(`[eye] ${png.length} bytes ${dest}`);
   } finally {
-    chrome.kill('SIGKILL');
+    try {
+      process.kill(-chrome.pid, 'SIGKILL');
+    } catch {
+      chrome.kill('SIGKILL');
+    }
     server.close();
   }
 }
