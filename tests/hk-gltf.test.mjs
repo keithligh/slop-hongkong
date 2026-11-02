@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
-import { keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
+import { digit1FarFrameFidelity, keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -44,7 +44,10 @@ import {
   DIGIT1_FAR_GRAIN_MIN_LOD,
   DIGIT1_FAR_GRAIN_PAST,
   landsdFarGrainForEntry,
+  landsdFarChartUnlit,
   landsdFarGrainMaxLod,
+  presentLandsdFarChartUnlit,
+  shadeDigit1FarChart,
   landsdLimitMipChain,
   packLandsdChartBins,
   landsdFarChaseMesh,
@@ -522,6 +525,82 @@ test('Lippo far-grain mip stops above the aerial lod and keeps window grain', ()
   assert.match(page, /uploadFarGrainMips/);
   assert.match(page, /far-grain mip/);
   assert.match(page, /cap >= 3/);
+  assert.doesNotMatch(page, /mipLevels\s*=\s*2/);
+});
+
+test('a far chart past 320 m is shown as captured, and the scene sun compresses its grain', () => {
+  const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
+  const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
+  const henderson = { minX: 218, maxX: 264, minZ: 54, maxZ: 105 };
+  const sampler = gltfAlbedoSampler(lippo);
+  assert.equal(landsdFarChartUnlit(lippo), true);
+  assert.equal(landsdFarChartUnlit(fairmont), false);
+  assert.equal(landsdFarChartUnlit(henderson), false);
+  assert.equal(sampler.farChartUnlit, true);
+  assert.equal(sampler.farGrainMaxLod, 3);
+  assert.equal(sampler.mipLevels, undefined);
+  assert.equal(gltfAlbedoSampler(fairmont).farChartUnlit, undefined);
+  assert.equal(gltfAlbedoSampler(henderson).farChartUnlit, undefined);
+  assert.equal(gltfAlbedoSampler(fairmont).farGrainMaxLod, undefined);
+  const chartMat = {
+    color: { set(hex) { this.hex = hex; } },
+    emissive: { set(hex) { this.hex = hex; } },
+    map: { isTexture: true },
+    emissiveMap: null,
+    emissiveIntensity: 0,
+    metalness: 0.5,
+    roughness: 0.4,
+    metalnessMap: { isTexture: true },
+    roughnessMap: { isTexture: true },
+    specularIntensity: 1,
+    envMapIntensity: 0.54,
+    userData: {}
+  };
+  assert.equal(presentLandsdFarChartUnlit(chartMat), 1);
+  assert.equal(chartMat.color.hex, 0x000000);
+  assert.equal(chartMat.emissive.hex, 0xffffff);
+  assert.equal(chartMat.emissiveMap, chartMat.map);
+  assert.equal(chartMat.emissiveIntensity, 1);
+  assert.equal(chartMat.metalness, 0);
+  assert.equal(chartMat.roughness, 1);
+  assert.equal(chartMat.metalnessMap, null);
+  assert.equal(chartMat.roughnessMap, null);
+  assert.equal(chartMat.specularIntensity, 0);
+  assert.equal(chartMat.envMapIntensity, 0);
+  assert.equal(chartMat.userData.hkFarChartUnlit, true);
+  assert.equal(presentLandsdFarChartUnlit({ map: { isTexture: true } }), 0);
+  const width = 160;
+  const height = 96;
+  const chart = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const win = (x % 8) < 3 && (y % 12) < 7;
+      const n = ((x * 13 + y * 7) % 5) - 2;
+      const o = (y * width + x) * 4;
+      const amp = 36;
+      chart[o] = (win ? 150 - amp : 168) + n;
+      chart[o + 1] = (win ? 146 - amp : 160) + n;
+      chart[o + 2] = (win ? 140 - amp : 148) + n;
+      chart[o + 3] = 255;
+    }
+  }
+  const lit = shadeDigit1FarChart(chart, width, height, 'lit');
+  const captured = shadeDigit1FarChart(chart, width, height, 'captured');
+  assert.ok(lit && captured);
+  assert.equal(shadeDigit1FarChart(chart, width, height, 'paint'), null);
+  const grainLit = keithEyeGrain(lit, width, height);
+  const grainCaptured = keithEyeGrain(captured, width, height);
+  const grainDelta = grainCaptured - grainLit;
+  const mad = keithEyeMad(lit, captured, width, height);
+  assert.ok(grainDelta >= 0.5, `grainΔ ${grainDelta}`);
+  assert.ok(mad >= 2, `mad ${mad}`);
+  const gate = digit1FarFrameFidelity();
+  assert.equal(gate.pass, false);
+  assert.equal(gate.reason, 'live-msi-required');
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /presentLandsdFarChartUnlit/);
+  assert.match(page, /farChartUnlit/);
+  assert.match(page, /far-chart unlit/);
   assert.doesNotMatch(page, /mipLevels\s*=\s*2/);
 });
 

@@ -26,6 +26,7 @@ import {
   landsdDilateGutter,
   packLandsdChartBins,
   landsdFarGrainMaxLod,
+  presentLandsdFarChartUnlit,
   landsdGutterFraction,
   landsdGutterMip,
   landsdLimitMipChain,
@@ -779,6 +780,9 @@ export function sharpenPhoto(material, sampler) {
     // photograph with a rough-metal response, which is brown dirt in street shadow.
     if (!mat.metalnessMap) mat.metalness = 0;
   }
+  // Past 320 m the JPEG is shown as captured, the same way the aerial is.
+  // Nearer chase charts stay lit. A missing map does not get a stand-in colour.
+  if (sampler?.farChartUnlit) presentLandsdFarChartUnlit(material);
 }
 
 // Boxes inside this distance can already satisfy the 260 m look-ray test.
@@ -916,11 +920,13 @@ export async function mountHkGltfBuildings(scene, plan) {
       const farChase = landsdFarChaseMesh(entry);
       const farSampler = gltfAlbedoSampler(entry);
       let farGrainLod = null;
+      let farChartUnlit = false;
       const noteFarGrain = (material) => {
         const list = Array.isArray(material) ? material : [material];
         for (const mat of list) {
           const lod = mat?.map?.userData?.hkFarGrainMaxLod;
           if (Number.isFinite(lod)) farGrainLod = lod;
+          if (mat?.userData?.hkFarChartUnlit) farChartUnlit = true;
         }
       };
       gltf.scene.traverse((obj) => {
@@ -977,6 +983,7 @@ export async function mountHkGltfBuildings(scene, plan) {
       if (Number.isFinite(farGrainLod)) {
         console.info(`[gltf] far-grain mip ${entry.file || entry.url} maxLod ${farGrainLod}`);
       }
+      if (farChartUnlit) console.info(`[gltf] far-chart unlit ${entry.file || entry.url}`);
       if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
       if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
       if (!meshes) throw new Error('no meshes');
