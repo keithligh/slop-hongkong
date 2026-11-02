@@ -1165,12 +1165,12 @@ function roadWetMasks(field, drainage = 0.0) {
 }
 
 /**
- * Roadway asphalt, footprint-filtered aggregate `bumpNormal`, scattered manholes
- * & Post-Rain Wetness (upgraded with techniques from CityGenerator.js `createRoadMaterial`).
- * cityUniforms.uRoadWetness drives damp stains, a glossy wet film & standing puddles (roadWetMasks): bone dry at
- * midday, a few small pools at golden hour, slick & mirroring the lights at night. Water's Fresnel rides on metalness
+ * Roadway asphalt, footprint-filtered aggregate `bumpNormal`, and post-rain wetness.
+ * cityUniforms.uRoadWetness drives damp stains, a glossy wet film and standing puddles (roadWetMasks): bone dry at
+ * midday, a few small pools at golden hour, slick and mirroring the lights at night. Water's Fresnel rides on metalness
  * (as for the rivers), so puddles reflect the street through SSR at grazing angles yet only darken seen from above.
  * Lane markings are separate geometry built from the road network (js/road-paint.js).
+ * The Digit1 disc yields this shader to LandsD photo tiles. See docs/HK_GROUND_TILES_CUT.md.
  */
 function createRoadSurfaceMaterial() {
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1180,7 +1180,6 @@ function createRoadSurfaceMaterial() {
 
   const cAsphaltDark = color(0x2b2e33);
   const cAsphaltLight = color(0x464a51);
-  const cManhole = color(0x4a433c);
 
   // Puddle field & wetness masks shared by every channel below (each node is generated once per fragment)
   const puddleField = roadPuddleField(positionWorld.x, positionWorld.z);
@@ -1216,16 +1215,9 @@ function createRoadSurfaceMaterial() {
       .mul(float(1.0).sub(oilyStain.mul(0.32)))
       .mul(float(1.0).sub(tarSeam));
 
-    // Circular cast-iron ConEd / NYC Sewer manhole covers scattered over the roadway (one 14 m cell in three)
-    const mhCell = floor(vec2(wx, wz).div(14.0));
-    const mhCentre = mhCell.add(vec2(hash2D(mhCell.add(13.7)), hash2D(mhCell.add(29.1))).mul(0.6).add(0.2)).mul(14.0);
-    const mhDist = length(vec2(wx, wz).sub(mhCentre));
-    const isManhole = float(1.0).sub(smoothstep(0.52, 0.60, mhDist)).mul(step(0.66, hash2D(mhCell))).mul(detail);
-    const mhRings = sin(mhDist.mul(36.0)).mul(0.15).add(0.85);
-
-    // Water filling the pores darkens the surface: damp stains & pools most, the overall wet film a little
+    // Water filling the pores darkens the surface: damp stains and pools most, the overall wet film a little.
     const wetDarkening = mix(mix(float(1.0), float(0.72), damp), float(0.6), puddle).mul(mix(float(1.0), float(0.8), film));
-    return mix(baseAsphalt, cManhole.mul(mhRings), isManhole).mul(wetDarkening);
+    return baseAsphalt.mul(wetDarkening);
   })();
 
   mat.roughnessNode = Fn(() => {

@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Digit1 ground mount</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.webgpu.js",
+        "three/webgpu": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.webgpu.js",
+        "three/tsl": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.tsl.js",
+        "three/addons/": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/examples/jsm/",
+        "three/addons/loaders/GLTFLoader.js": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@5e6eee6ce8757abde7105aba35a358feac986e91/examples/jsm/loaders/GLTFLoader.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <pre id="out">mounting</pre>
+  <script type="module">
+    import * as THREE from 'three/webgpu';
+    import { HK_STREET_EYE } from '../js/city-config.js';
+    import { mountHkGroundTiles } from '../js/hk-ground-tiles.js';
+
+    const out = document.getElementById('out');
+    window.addEventListener('error', (event) => {
+      out.textContent = `error ${event.message}`;
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      out.textContent = `reject ${event.reason?.message || event.reason}`;
+    });
+    out.textContent = 'renderer';
+    const renderer = new THREE.WebGPURenderer({ antialias: false });
+    await renderer.init();
+    out.textContent = 'tiles';
+    const scene = new THREE.Scene();
+    const result = await mountHkGroundTiles(scene, renderer, { href: location.href });
+    let textured = 0;
+    let nearest = Infinity;
+    scene.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const image = obj.material?.map?.image;
+      if (image && (image.width || image.displayWidth)) textured += 1;
+      const position = obj.geometry?.attributes?.position;
+      if (!position) return;
+      for (let i = 0; i < position.count; i += 40) {
+        const dx = position.getX(i) - HK_STREET_EYE.x;
+        const dz = position.getZ(i) - HK_STREET_EYE.z;
+        nearest = Math.min(nearest, Math.hypot(dx, dz));
+      }
+    });
+    out.textContent = JSON.stringify({
+      loaded: result.loaded,
+      failed: result.failed,
+      ownership: result.ownership,
+      snap: result.snap,
+      triangles: result.triangles,
+      textured,
+      nearest: Number.isFinite(nearest) ? nearest : null
+    });
+  </script>
+</body>
+</html>
