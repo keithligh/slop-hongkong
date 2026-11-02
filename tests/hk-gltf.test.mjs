@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
+import { keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -39,6 +40,12 @@ import {
   landsdChartWrap,
   landsdDilateGutter,
   landsdGutterMip,
+  DIGIT1_FAR_CHART_EDGE,
+  DIGIT1_FAR_GRAIN_MIN_LOD,
+  DIGIT1_FAR_GRAIN_PAST,
+  landsdFarGrainForEntry,
+  landsdFarGrainMaxLod,
+  landsdLimitMipChain,
   packLandsdChartBins,
   landsdFarChaseMesh,
   landsdNullFillTriangles,
@@ -437,6 +444,9 @@ test('Des Voeux chase photographs pack the chart past 80 m, and off-look sheets 
   assert.equal(gltfAlbedoSampler(fairmont).anisotropy, 16);
   assert.equal(gltfAlbedoSampler(lippo).mipmaps, true);
   assert.equal(gltfAlbedoSampler(lippo).chartMips, true);
+  assert.equal(gltfAlbedoSampler(lippo).mipLevels, undefined);
+  assert.equal(gltfAlbedoSampler(fairmont).farGrainMaxLod, undefined);
+  assert.equal(gltfAlbedoSampler(henderson).farGrainMaxLod, undefined);
   const behind = { minX: -220, maxX: -160, minZ: 0, maxZ: 50 };
   assert.equal(gltfInStreetChase(behind), false);
   assert.equal(gltfAlbedoSampler(behind).mipmaps, true);
@@ -444,6 +454,75 @@ test('Des Voeux chase photographs pack the chart past 80 m, and off-look sheets 
   assert.equal(gltfAlbedoSampler(behind).maxEdge, 2048);
   assert.equal(HK_STREET_EYE.x, -1.4);
   assert.equal(HK_STREET_EYE.z, 29.3);
+});
+
+test('Lippo far-grain mip stops above the aerial lod and keeps window grain', () => {
+  const lippo = { minX: 341, maxX: 384, minZ: 135, maxZ: 178 };
+  const fairmont = { minX: 278, maxX: 316, minZ: 86, maxZ: 121 };
+  const henderson = { minX: 218, maxX: 264, minZ: 54, maxZ: 105 };
+  assert.equal(DIGIT1_FAR_GRAIN_PAST, 320);
+  assert.equal(DIGIT1_FAR_GRAIN_MIN_LOD, 3);
+  assert.equal(DIGIT1_FAR_CHART_EDGE, 4096);
+  const cap = landsdFarGrainForEntry(lippo);
+  assert.equal(cap, 3);
+  assert.equal(landsdFarGrainForEntry(fairmont), null);
+  assert.equal(landsdFarGrainForEntry(henderson), null);
+  assert.equal(landsdFarGrainMaxLod(358, 43, 1024), null);
+  const sampler = gltfAlbedoSampler(lippo);
+  assert.equal(sampler.farGrainMaxLod, cap);
+  assert.equal(sampler.mipLevels, undefined);
+  assert.ok(sampler.farGrainDistance > DIGIT1_FAR_GRAIN_PAST);
+  assert.equal(sampler.chartMips, true);
+  assert.equal(sampler.anisotropy, 16);
+  const width = 256;
+  const height = 256;
+  const src = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const on = (x % 16) < 8;
+      const o = (y * width + x) * 4;
+      src[o] = on ? 32 : 206;
+      src[o + 1] = on ? 44 : 196;
+      src[o + 2] = on ? 58 : 176;
+      src[o + 3] = 255;
+    }
+  }
+  const kept = landsdLimitMipChain(src, width, height, cap);
+  const full = landsdLimitMipChain(src, width, height, 8);
+  assert.ok(kept);
+  assert.equal(kept.length, cap + 1);
+  assert.ok(kept.length >= 4);
+  assert.ok(full.length > kept.length);
+  const blit = (level) => {
+    const dw = 96;
+    const dh = 64;
+    const out = new Uint8ClampedArray(dw * dh * 4);
+    for (let y = 0; y < dh; y++) {
+      for (let x = 0; x < dw; x++) {
+        const sx = Math.min(level.width - 1, (x * level.width / dw) | 0);
+        const sy = Math.min(level.height - 1, (y * level.height / dh) | 0);
+        const s = (sy * level.width + sx) * 4;
+        const d = (y * dw + x) * 4;
+        out[d] = level.data[s];
+        out[d + 1] = level.data[s + 1];
+        out[d + 2] = level.data[s + 2];
+        out[d + 3] = 255;
+      }
+    }
+    return out;
+  };
+  const sharp = blit(kept[kept.length - 1]);
+  const flat = blit(full[Math.min(cap + 2, full.length - 1)]);
+  const mad = keithEyeMad(flat, sharp, 96, 64);
+  const grainDelta = keithEyeGrain(sharp, 96, 64) - keithEyeGrain(flat, 96, 64);
+  assert.ok(mad >= 2, `mad ${mad}`);
+  assert.ok(Math.abs(grainDelta) >= 0.5, `grainΔ ${grainDelta}`);
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /landsdLimitMipChain/);
+  assert.match(page, /uploadFarGrainMips/);
+  assert.match(page, /far-grain mip/);
+  assert.match(page, /cap >= 3/);
+  assert.doesNotMatch(page, /mipLevels\s*=\s*2/);
 });
 
 test('a LandsD sub-rectangle chart crops, and a gutter mip keeps the photograph', () => {

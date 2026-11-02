@@ -916,13 +916,77 @@ export function bakeGltfWorldTriangles(doc, buffers, sidewalk = ISLAND_BOUNDS.si
   };
 }
 
+// Far-frame grain. The chase camera is FOV 56 on a 1280-wide eye. A 4096 chart
+// on a Lippo-sized face (~43 m, closest ~358 m) wants about mip 5, which
+// averages the window grid into the same hp_std the 2017 aerial already had.
+// Stopping one level above that LOD keeps the photograph's grain. The floor is
+// four levels (0..3). Two levels is the alias the chase sampler rejects, so a
+// chart that is already near that floor keeps the full chain. Fairmont House
+// and The Henderson are closer than 320 m and do not take this path.
+export const DIGIT1_FAR_GRAIN_PAST = 320;
+export const DIGIT1_FAR_GRAIN_VIEW = 1280;
+export const DIGIT1_FAR_GRAIN_FOV = 56;
+export const DIGIT1_FAR_CHART_EDGE = 4096;
+export const DIGIT1_FAR_GRAIN_MIN_LOD = 3;
+
+export function landsdFarGrainMesh(entry, eye = HK_STREET_EYE, past = DIGIT1_FAR_GRAIN_PAST) {
+  if (!entry || !gltfInStreetChase(entry, eye)) return false;
+  if (!(boxClosestDistance(entry, eye) > past)) return false;
+  const spanX = entry.maxX - entry.minX;
+  const spanZ = entry.maxZ - entry.minZ;
+  return Math.max(spanX, spanZ) >= 8;
+}
+
+export function landsdFarGrainMaxLod(distance, faceMetres, chartEdge, viewWidth = DIGIT1_FAR_GRAIN_VIEW) {
+  const edge = chartEdge | 0;
+  const view = viewWidth | 0;
+  if (!(distance > DIGIT1_FAR_GRAIN_PAST) || !(faceMetres > 1) || !(edge >= 8) || !(view >= 8)) return null;
+  const pixel = (2 * distance * Math.tan((DIGIT1_FAR_GRAIN_FOV * Math.PI) / 360)) / view;
+  const texel = faceMetres / edge;
+  if (!(pixel > 0) || !(texel > 0)) return null;
+  const hardware = Math.log2(pixel / texel);
+  const cap = Math.floor(hardware) - 1;
+  if (!(cap >= DIGIT1_FAR_GRAIN_MIN_LOD)) return null;
+  if (!(cap + 0.5 < hardware)) return null;
+  return cap;
+}
+
+export function landsdFarGrainForEntry(entry, chartEdge = DIGIT1_FAR_CHART_EDGE, eye = HK_STREET_EYE) {
+  if (!landsdFarGrainMesh(entry, eye)) return null;
+  const face = Math.max(entry.maxX - entry.minX, entry.maxZ - entry.minZ);
+  return landsdFarGrainMaxLod(boxClosestDistance(entry, eye), face, chartEdge);
+}
+
+// Levels 0..maxLod. The GPU clamps to the last one, so a missing coarser mip
+// is not sampled. Gutter texels stay out of the average, same as the full chain.
+export function landsdLimitMipChain(src, width, height, maxLod) {
+  const cap = maxLod | 0;
+  const w0 = width | 0;
+  const h0 = height | 0;
+  if (!(cap >= 1) || !(w0 > 0) || !(h0 > 0) || !src) return null;
+  const levels = [{ data: src, width: w0, height: h0 }];
+  let data = src;
+  let w = w0;
+  let h = h0;
+  while (levels.length <= cap && (w > 1 || h > 1)) {
+    const next = landsdGutterMip(data, w, h);
+    levels.push(next);
+    data = next.data;
+    w = next.width;
+    h = next.height;
+  }
+  return levels;
+}
+
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
   // Chase photographs pack to the UV chart and mip without the gutter.
   // mipLevels is intentionally unset: a two-level stop is the grain. Off-look
   // masses (maxEdge 2048) keep a downscaled chain and do not take this path.
+  // A far chase box past 320 m adds farGrainMaxLod. That caps the chain; it
+  // does not set mipLevels.
   if (maxEdge === 0) {
-    return {
+    const sampler = {
       maxEdge: 0,
       mipmaps: true,
       chartMips: true,
@@ -930,6 +994,13 @@ export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX
       minFilter: 'mipmap',
       wrap: 'clamp'
     };
+    const farGrainMaxLod = landsdFarGrainForEntry(entry, DIGIT1_FAR_CHART_EDGE, eye);
+    if (Number.isFinite(farGrainMaxLod)) {
+      sampler.farGrainMaxLod = farGrainMaxLod;
+      sampler.farGrainDistance = boxClosestDistance(entry, eye);
+      sampler.farGrainFace = Math.max(entry.maxX - entry.minX, entry.maxZ - entry.minZ);
+    }
+    return sampler;
   }
   return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
 }
