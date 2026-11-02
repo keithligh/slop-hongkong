@@ -978,13 +978,114 @@ export function landsdLimitMipChain(src, width, height, maxLod) {
   return levels;
 }
 
+// The LandsD JPEG is already a sunlit photograph, same as the 2017 aerial.
+// MeshStandardMaterial multiplies it by the golden-hour sun (intensity 5.8)
+// and Lambert divides by PI, then ACES shoulders the window grid. The aerial
+// is drawn with a black base and the JPEG as emissive, so that second sun
+// never lands. A chase box past 320 m (Lippo, not Fairmont or Henderson)
+// takes the same response. This does not set mipLevels and it does not paint
+// a crop. Soft PASS is still a live MSI pair.
+export function landsdFarChartUnlit(entry, eye = HK_STREET_EYE) {
+  return landsdFarGrainMesh(entry, eye);
+}
+
+// Camera-facing Lippo normal against TIME_PRESETS.golden sunDir
+// (-0.44, 0.58, -0.68) at heading 1.29. N·L ≈ 0.61.
+export const DIGIT1_FAR_CHART_NDOTL = 0.61;
+
+const FAR_CHART_SUN = Object.freeze([1, 0xca / 255, 0x92 / 255]);
+const FAR_CHART_SKY = Object.freeze([0x9a / 255, 0xbb / 255, 0xe6 / 255]);
+const FAR_CHART_GROUND = Object.freeze([0xc8 / 255, 0x8a / 255, 0x62 / 255]);
+
+function srgbByteToLinear(byte) {
+  const c = byte / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+function linearToSrgbByte(value) {
+  const c = Math.max(0, value);
+  const encoded = c <= 0.0031308 ? 12.92 * c : 1.055 * (c ** (1 / 2.4)) - 0.055;
+  return Math.max(0, Math.min(255, Math.round(encoded * 255)));
+}
+
+function acesFilmic(value) {
+  const x = Math.max(0, value);
+  const a = 2.51;
+  const b = 0.03;
+  const c = 2.43;
+  const d = 0.59;
+  const e = 0.14;
+  return (x * (a * x + b)) / (x * (c * x + d) + e);
+}
+
+// Display model of one far-chart texel. `captured` is the aerial response
+// (emissive JPEG, no scene sun). `lit` is MeshStandardMaterial Lambert under
+// the golden sun at DIGIT1_FAR_CHART_NDOTL, then the same exposure, ACES, and
+// contrast the post pass applies. The buffer is not a Keith-eye crop.
+export function shadeDigit1FarChart(src, width, height, mode, ndotl = DIGIT1_FAR_CHART_NDOTL) {
+  const w = width | 0;
+  const h = height | 0;
+  if ((mode !== 'lit' && mode !== 'captured') || !(w > 0) || !(h > 0) || !src) return null;
+  const sun = Number.isFinite(ndotl) ? Math.max(0, Math.min(1, ndotl)) : DIGIT1_FAR_CHART_NDOTL;
+  const out = new Uint8ClampedArray(w * h * 4);
+  const exposure = 1.04;
+  const contrast = 1.12;
+  const balance = [1.045, 1, 0.955];
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    const linear = [0, 1, 2].map((channel) => srgbByteToLinear(src[o + channel]));
+    const shaded = mode === 'captured' ? linear : linear.map((albedo, channel) => {
+      const direct = 5.8 * sun * FAR_CHART_SUN[channel];
+      const hemi = 1.48 * (0.35 * FAR_CHART_GROUND[channel] + 0.65 * FAR_CHART_SKY[channel]);
+      const irradiance = direct + hemi;
+      return albedo * (irradiance / Math.PI) * (1 - 0.04);
+    });
+    const graded = shaded.map((value, channel) => value * exposure * balance[channel]);
+    const mapped = graded.map((value) => acesFilmic(value));
+    const luma = 0.2126 * mapped[0] + 0.7152 * mapped[1] + 0.0722 * mapped[2];
+    const pivot = (Math.max(luma, 0.0001) / 0.18) ** (contrast - 1);
+    const rgb = mapped.map((value) => linearToSrgbByte(value * pivot));
+    out[o] = rgb[0];
+    out[o + 1] = rgb[1];
+    out[o + 2] = rgb[2];
+    out[o + 3] = 255;
+  }
+  return out;
+}
+
+// Black base, photograph as emissive, no metal and no specular veil.
+// Same response showPhoto uses for the PlanD JPEG. A material with no
+// albedo map is left alone: there is no photograph to show.
+export function presentLandsdFarChartUnlit(material) {
+  const list = Array.isArray(material) ? material : [material];
+  let applied = 0;
+  for (const mat of list) {
+    if (!mat?.map?.isTexture || typeof mat.emissive?.set !== 'function' || typeof mat.color?.set !== 'function') continue;
+    mat.color.set(0x000000);
+    mat.emissive.set(0xffffff);
+    mat.emissiveMap = mat.map;
+    if ('emissiveIntensity' in mat) mat.emissiveIntensity = 1;
+    if ('metalness' in mat) mat.metalness = 0;
+    if ('roughness' in mat) mat.roughness = 1;
+    if ('metalnessMap' in mat) mat.metalnessMap = null;
+    if ('roughnessMap' in mat) mat.roughnessMap = null;
+    if ('specularIntensity' in mat) mat.specularIntensity = 0;
+    if ('envMapIntensity' in mat) mat.envMapIntensity = 0;
+    if (!mat.userData) mat.userData = {};
+    mat.userData.hkFarChartUnlit = true;
+    applied++;
+  }
+  return applied;
+}
+
 export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX_NEAR) {
   const maxEdge = gltfTextureMaxEdge(entry, eye, near);
   // Chase photographs pack to the UV chart and mip without the gutter.
   // mipLevels is intentionally unset: a two-level stop is the grain. Off-look
   // masses (maxEdge 2048) keep a downscaled chain and do not take this path.
-  // A far chase box past 320 m adds farGrainMaxLod. That caps the chain; it
-  // does not set mipLevels.
+  // A far chase box past 320 m adds farGrainMaxLod and farChartUnlit. The lod
+  // caps the chain. The unlit flag shows the JPEG as captured. Neither sets
+  // mipLevels.
   if (maxEdge === 0) {
     const sampler = {
       maxEdge: 0,
@@ -1000,6 +1101,7 @@ export function gltfAlbedoSampler(entry, eye = HK_STREET_EYE, near = HK_GLTF_TEX
       sampler.farGrainDistance = boxClosestDistance(entry, eye);
       sampler.farGrainFace = Math.max(entry.maxX - entry.minX, entry.maxZ - entry.minZ);
     }
+    if (landsdFarChartUnlit(entry, eye)) sampler.farChartUnlit = true;
     return sampler;
   }
   return { maxEdge, mipmaps: true, anisotropy: 16, minFilter: 'mipmap' };
