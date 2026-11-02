@@ -3,10 +3,11 @@
 //   node tools/digit1-eye-shot.mjs artifacts/eye-east.png
 //   node tools/digit1-eye-shot.mjs artifacts/eye-east.png --query 'at=-1.4,29.3,1.29&landsdAniso=1'
 //   node tools/digit1-eye-shot.mjs before.png --root /tmp/before --hide-hud
+//   node tools/digit1-eye-shot.mjs seams.png --page tools/digit1-ground-seams.html --query 'ppm=40'
 // --root serves another checkout (the BEFORE tip of a live A-B). --hide-hud
 // drops the DOM panels so a ground crop scores the scene, not the HUD.
 
-import { createReadStream, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -78,6 +79,10 @@ function chromeArgs(port) {
     '--use-webgpu-adapter=swiftshader',
     '--enable-logging=stderr',
     '--log-level=0',
+    // data.map.gov.hk sits behind a cache that sometimes answers with another
+    // origin's Access-Control-Allow-Origin (AllowOriginMismatch). The harness
+    // serves from a random localhost port, so it cannot rely on that header.
+    '--disable-web-security',
     '--force-device-scale-factor=1',
     '--window-size=1280,720',
     `--remote-debugging-port=${port}`,
@@ -90,7 +95,8 @@ async function main() {
   const dest = path.resolve(repoRoot, process.argv[2] || 'artifacts/eye-east.png');
   const query = argValue('--query') || 'at=-1.4,29.3,1.29';
   const server = await startServer();
-  const pageUrl = `http://127.0.0.1:${server.address().port}/index.html?${query}`;
+  const page = argValue('--page') || 'index.html';
+  const pageUrl = `http://127.0.0.1:${server.address().port}/${page}?${query}`;
   const chrome = spawn(CHROME, chromeArgs(9224), { stdio: 'ignore', detached: true });
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   try {
@@ -114,12 +120,25 @@ async function main() {
       ws.addEventListener('error', () => reject(new Error('devtools socket')));
     });
     let id = 0;
+    let groundMounted = false;
+    const urls = new Map();
     const pending = new Map();
     ws.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
       if (message.method === 'Runtime.consoleAPICalled') {
         const text = (message.params.args || []).map((arg) => arg.value ?? arg.description ?? '').join(' ');
         if (/\[(ground-tiles|gltf|pland)\]/.test(text)) console.log(`[page] ${text}`);
+        if (/\[ground-tiles\] mounted/.test(text)) groundMounted = true;
+      }
+      if (message.method === 'Runtime.exceptionThrown') {
+        console.log(`[page] exception ${message.params.exceptionDetails?.exception?.description || message.params.exceptionDetails?.text}`);
+      }
+      if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
+        console.log(`[page] error ${(message.params.args || []).map((arg) => arg.value ?? arg.description ?? '').join(' ').slice(0, 300)}`);
+      }
+      if (message.method === 'Network.requestWillBeSent') urls.set(message.params.requestId, message.params.request.url);
+      if (message.method === 'Network.loadingFailed' && /map\.gov\.hk/.test(urls.get(message.params.requestId) || '')) {
+        console.log(`[net] ${JSON.stringify(message.params)} ${(urls.get(message.params.requestId) || '').slice(0, 90)}`);
       }
       if (message.id && pending.has(message.id)) {
         pending.get(message.id)(message);
@@ -132,6 +151,7 @@ async function main() {
       ws.send(JSON.stringify({ id: msgId, method, params }));
     });
     await send('Runtime.enable');
+    await send('Network.enable');
     await send('Page.enable');
     await send('Page.navigate', { url: pageUrl });
     const deadline = Date.now() + 240000;
@@ -139,8 +159,9 @@ async function main() {
     while (Date.now() < deadline && !ready) {
       const message = await send('Runtime.evaluate', {
         expression: `(() => {
+          if (window.__seams) return window.__seams.stage === 'ready' ? 'ready' : '';
           const overlay = document.getElementById('loading-overlay');
-          const gone = !overlay || overlay.classList.contains('hidden');
+          const gone = !!overlay && overlay.classList.contains('hidden');
           return gone ? 'ready' : '';
         })()`,
         returnByValue: true
@@ -159,6 +180,13 @@ async function main() {
       });
     }
     await sleep(1500);
+    if (!groundMounted && !/groundTiles=(off|0)/.test(query) && existsSync(path.join(root, 'js/hk-ground-tiles.js'))) {
+      throw new Error('ground tiles did not mount (tileset fetch failed); this frame is not a ground crop');
+    }
+    if (page !== 'index.html') {
+      const info = await send('Runtime.evaluate', { expression: 'JSON.stringify(window.__seams)', returnByValue: true });
+      console.log(`[page] ${info.result?.result?.value}`);
+    }
     const shot = await send('Page.captureScreenshot', { format: 'png' });
     const png = Buffer.from(shot.result.data, 'base64');
     mkdirSync(path.dirname(dest), { recursive: true });

@@ -5,17 +5,24 @@ import { createGroundPhotoMaterial } from './hk-ground-photo.js';
 import {
   HK_GROUND_ATTRIBUTION,
   HK_GROUND_BASIS_PATH,
+  HK_GROUND_CHART_CLEARANCE,
   HK_GROUND_DECK_NAMES,
   HK_GROUND_SAMPLE_RADIUS,
+  HK_GROUND_TINT_BANDS,
   HK_GROUND_TILE_DISC,
   deckInstancesToYield,
   ecefToWorld,
   gltfVertexToEcef,
   groundSnapOffset,
+  groundTintBand,
+  groundTileGsdCm,
+  groundTileLift,
   parseB3dm,
   readGlbMesh,
   resolveGroundPhotoMode,
   resolveGroundPhotoTuning,
+  resolveGroundPriority,
+  resolveGroundTint,
   resolveGroundTilesRequest,
   selectDigit1GroundTiles,
   tileTriangleYieldsToBuilding
@@ -63,7 +70,15 @@ function bakeMesh(mesh, matrix, rtc, map, mode, tuning) {
   material.polygonOffset = true;
   material.polygonOffsetFactor = 1;
   material.polygonOffsetUnits = 1;
-  return { geometry, material };
+  return { geometry, material, width: map.image?.width || 1, height: map.image?.height || 1 };
+}
+
+// Diagnostic paint for finding seams on a live frame (?groundTint=gsd|tile).
+function tintMaterial(mode, gsdCm, index) {
+  let colour = 0x444444;
+  if (mode === 'tile') colour = new THREE.Color().setHSL((index * 0.381966) % 1, 0.7, 0.5).getHex();
+  else if (gsdCm > 0) colour = HK_GROUND_TINT_BANDS[groundTintBand(gsdCm)].rgb;
+  return new THREE.MeshBasicMaterial({ color: colour, side: THREE.DoubleSide });
 }
 
 function dropBuildingTriangles(geometry, boxes) {
@@ -180,6 +195,8 @@ export async function mountHkGroundTiles(scene, renderer, {
   }
   const photoMode = resolveGroundPhotoMode(href || 'http://localhost/');
   const tuning = resolveGroundPhotoTuning(href || 'http://localhost/');
+  const tint = resolveGroundTint(href || 'http://localhost/');
+  const priority = resolveGroundPriority(href || 'http://localhost/');
   const ktx2 = new KTX2Loader();
   ktx2.setTranscoderPath(HK_GROUND_BASIS_PATH);
   try {
@@ -229,6 +246,7 @@ export async function mountHkGroundTiles(scene, renderer, {
   group.name = 'HkGroundTiles';
   let loaded = 0;
   let triangles = 0;
+  let eyeGsd = 0;
   for (const item of pending) {
     const position = item.geometry.attributes.position;
     for (let i = 0; i < position.count; i++) position.setY(i, position.getY(i) - offset);
@@ -239,11 +257,29 @@ export async function mountHkGroundTiles(scene, renderer, {
       item.geometry.dispose();
       continue;
     }
+    const gsdCm = groundTileGsdCm(
+      position.array,
+      item.geometry.attributes.uv.array,
+      index.array,
+      item.width,
+      item.height,
+      HK_GROUND_CHART_CLEARANCE
+    );
+    if (priority === 'finer') {
+      // The tile nearest the eye is first and does not move; see groundTileLift.
+      if (!(eyeGsd > 0)) eyeGsd = gsdCm;
+      const lift = groundTileLift(gsdCm, eyeGsd);
+      if (lift) {
+        for (let i = 0; i < position.count; i++) position.setY(i, position.getY(i) + lift);
+        position.needsUpdate = true;
+      }
+    }
     item.geometry.computeBoundingSphere();
-    const mesh = new THREE.Mesh(item.geometry, item.material);
+    const mesh = new THREE.Mesh(item.geometry, tint ? tintMaterial(tint, gsdCm, group.children.length) : item.material);
     mesh.name = 'HkGroundTile';
     mesh.userData.hkSource = 'landsd-3dtiles';
     mesh.userData.hkFile = item.file;
+    mesh.userData.hkGsdCm = gsdCm;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.renderOrder = 1;

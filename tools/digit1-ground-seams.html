@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Digit1 ground seams (top-down)</title>
+  <style>html, body { margin: 0; background: #000; overflow: hidden; }</style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.webgpu.js",
+        "three/webgpu": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.webgpu.js",
+        "three/tsl": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/build/three.tsl.js",
+        "three/addons/": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@f17eb5d689094a3fbd4cd0d64d54729a48036ce0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <script type="module">
+    import * as THREE from 'three/webgpu';
+    import { HK_STREET_EYE } from '../js/city-config.js';
+    import { mountHkGroundTiles } from '../js/hk-ground-tiles.js';
+
+    // Orthographic plan view of the mounted ground band: x east, z south, north
+    // up. ?cx=&cz= centre (world metres), ?ppm= pixels per metre, plus any
+    // ?groundTint= / ?groundPhoto= the page itself understands. Facade triangles
+    // are dropped so the carriageway is not hidden by an eave.
+    const params = new URLSearchParams(location.search);
+    const cx = Number(params.get('cx') ?? HK_STREET_EYE.x + 6);
+    const cz = Number(params.get('cz') ?? HK_STREET_EYE.z);
+    const ppm = Number(params.get('ppm') ?? 40);
+    const CEILING = 1.8;
+
+    window.__seams = { stage: 'renderer' };
+    const renderer = new THREE.WebGPURenderer({ antialias: false });
+    renderer.setPixelRatio(1);
+    renderer.setSize(innerWidth, innerHeight);
+    document.body.appendChild(renderer.domElement);
+    await renderer.init();
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x203040);
+    window.__seams.stage = 'tiles';
+    const result = await mountHkGroundTiles(scene, renderer, { href: location.href });
+    scene.traverse((obj) => {
+      if (!obj.isMesh) return;
+      const position = obj.geometry.attributes.position;
+      const index = obj.geometry.index;
+      const keep = [];
+      for (let i = 0; i + 2 < index.count; i += 3) {
+        const a = index.getX(i);
+        const b = index.getX(i + 1);
+        const c = index.getX(i + 2);
+        if (Math.max(position.getY(a), position.getY(b), position.getY(c)) <= CEILING) keep.push(a, b, c);
+      }
+      obj.geometry.setIndex(keep);
+    });
+    const halfW = innerWidth / ppm / 2;
+    const halfH = innerHeight / ppm / 2;
+    const camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 100);
+    camera.position.set(cx, 40, cz);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(cx, 0, cz);
+    camera.updateProjectionMatrix();
+    const tiles = [];
+    scene.traverse((obj) => {
+      if (obj.isMesh) tiles.push({ file: obj.userData.hkFile, gsdCm: obj.userData.hkGsdCm });
+    });
+    let frames = 0;
+    renderer.setAnimationLoop(() => {
+      renderer.render(scene, camera);
+      frames += 1;
+      if (frames === 6) window.__seams = { stage: 'ready', loaded: result.loaded, tiles, canvas: [renderer.domElement.width, renderer.domElement.height], win: [innerWidth, innerHeight], meshes: scene.children.length };
+    });
+  </script>
+</body>
+</html>

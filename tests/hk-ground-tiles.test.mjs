@@ -12,10 +12,25 @@ import {
   HK_GROUND_PHOTO_MAG_FULL,
   HK_GROUND_PHOTO_MAG_NONE,
   HK_GROUND_PHOTO_SHARPEN,
+  HK_GROUND_LIFT_MAX,
   HK_GROUND_RESIDUAL_CROPS,
+  HK_GROUND_SEAM_BAND_MAD,
+  HK_GROUND_SEAM_RAGGED_CEIL,
+  HK_GROUND_TINT_BANDS,
   catmullRomWeights,
   cropRgba,
   digit1GroundResiduals,
+  digit1GroundSeams,
+  groundSeamBandMask,
+  groundSeamLines,
+  groundTileGsdCm,
+  groundTileLift,
+  groundTintBand,
+  groundTintBandOfRgb,
+  maskedGrain,
+  maskedMad,
+  resolveGroundPriority,
+  resolveGroundTint,
   groundPhotoMagnification,
   resolveGroundPhotoMode,
   resolveGroundPhotoTuning,
@@ -379,4 +394,235 @@ test('Cut #45 residual bar needs live right-kerb AND underfoot floors', () => {
   assert.equal(digit1GroundResiduals({ live: true, synthetic: true, ownership: 'tiles', crops: { 'right-kerb': pair, underfoot: pair } }).pass, false);
   assert.equal(digit1GroundResiduals({ live: true, ownership: 'procedural', crops: { 'right-kerb': pair, underfoot: pair } }).pass, false);
   assert.equal(HK_GROUND_GRAIN_FLOOR, 0.35);
+});
+
+// Cut #46: LOD seams under the mounted tiles.
+
+test('tile GSD is the world size of one texel on the ground band', () => {
+  // 1 m x 1 m of ground over a 100 x 100 texel photograph: 1 cm per texel.
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1]);
+  const uvs = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);
+  const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+  assert.ok(Math.abs(groundTileGsdCm(positions, uvs, indices, 100, 100) - 1) < 1e-6);
+  assert.ok(Math.abs(groundTileGsdCm(positions, uvs, indices, 50, 100) - Math.sqrt(2)) < 1e-6);
+  // A facade triangle above the ceiling does not count as ground.
+  const tall = new Float32Array([...positions, 0, 9, 0, 1, 9, 0, 1, 9, 0.001]);
+  const tallUv = new Float32Array([...uvs, 0, 0, 0.9, 0, 0.9, 0.9]);
+  const tallIdx = new Uint16Array([...indices, 4, 5, 6]);
+  assert.ok(Math.abs(groundTileGsdCm(tall, tallUv, tallIdx, 100, 100, 1.8) - 1) < 1e-6);
+  assert.equal(groundTileGsdCm(positions, uvs, new Uint16Array(), 100, 100), 0);
+});
+
+test('finer tiles are lifted over coarser ones and the eye tile does not move', () => {
+  const eye = 2.1;
+  assert.equal(groundTileLift(eye, eye), 0);
+  const fine = groundTileLift(0.5, eye);
+  const coarse = groundTileLift(4, eye);
+  const coarser = groundTileLift(6, eye);
+  assert.ok(fine > 0 && coarse < 0 && coarser < coarse, `${fine} ${coarse} ${coarser}`);
+  // The gap between the 2 cm and 4 cm photographs clears the depth noise of an overlap (about 2 mm).
+  assert.ok(groundTileLift(2.1, eye) - coarse >= 0.005);
+  assert.ok(Math.abs(groundTileLift(90, eye)) <= HK_GROUND_LIFT_MAX);
+  assert.equal(groundTileLift(0, eye), 0, 'a tile with no ground triangles has no GSD to rank');
+  assert.equal(groundTileLift(2, 0), 0);
+});
+
+test('seam queries default to finer-wins and keep a tint diagnostic', () => {
+  assert.equal(resolveGroundPriority('http://localhost/'), 'finer');
+  assert.equal(resolveGroundPriority('http://localhost/?groundPriority=off'), 'off');
+  assert.equal(resolveGroundPriority('http://localhost/?groundPriority=0'), 'off');
+  assert.equal(resolveGroundTint('http://localhost/'), '');
+  assert.equal(resolveGroundTint('http://localhost/?groundTint=gsd'), 'gsd');
+  assert.equal(resolveGroundTint('http://localhost/?groundTint=tile'), 'tile');
+  assert.equal(resolveGroundTint('http://localhost/?groundTint=x'), '');
+  assert.equal(groundTintBand(0.5), 0);
+  assert.equal(groundTintBand(2.1), 1);
+  assert.equal(groundTintBand(4), 3);
+  assert.equal(groundTintBand(40), HK_GROUND_TINT_BANDS.length - 1);
+});
+
+test('tint bands are read back from tone-mapped screenshot colours', () => {
+  assert.equal(groundTintBandOfRgb(169, 112, 28), 3, 'orange, 3.5-5 cm');
+  assert.equal(groundTintBandOfRgb(77, 149, 56), 1, 'green, 1-2.2 cm');
+  assert.equal(groundTintBandOfRgb(240, 220, 60), 2, 'yellow, 2.2-3.5 cm');
+  assert.equal(groundTintBandOfRgb(200, 40, 40), 4, 'red, over 5 cm');
+  assert.equal(groundTintBandOfRgb(230, 40, 230), 0, 'magenta, under 1 cm');
+  assert.equal(groundTintBandOfRgb(40, 44, 50), -1, 'sky, asphalt and the avatar are not paint');
+  assert.equal(groundTintBandOfRgb(0, 0, 0), -1);
+});
+
+const SEAM_W = 240;
+const SEAM_H = 120;
+const ORANGE = [240, 150, 40];
+const GREEN = [100, 210, 80];
+const ASPHALT = [28, 30, 34];
+
+function seamFrames({ ragged = false, shift = 0, grit = 0 } = {}) {
+  const tint = new Uint8ClampedArray(SEAM_W * SEAM_H * 4);
+  const photo = new Uint8ClampedArray(SEAM_W * SEAM_H * 4);
+  for (let y = 0; y < SEAM_H; y++) {
+    // The seam leans like a ground line seen ahead: x = 90 + 0.25 y.
+    const line = 90 + 0.25 * y + shift;
+    // Z-fighting hands whole triangles to one tile or the other.
+    const tooth = ragged ? Math.round(((y * 7919) % 13) - 6) * 1.8 : 0;
+    for (let x = 0; x < SEAM_W; x++) {
+      const o = (y * SEAM_W + x) * 4;
+      const rgb = x < line + tooth ? ORANGE : GREEN;
+      tint[o] = rgb[0];
+      tint[o + 1] = rgb[1];
+      tint[o + 2] = rgb[2];
+      tint[o + 3] = 255;
+      const noise = grit ? ((x * 31 + y * 17) % 5) * grit : 0;
+      photo[o] = ASPHALT[0] + noise;
+      photo[o + 1] = ASPHALT[1] + noise;
+      photo[o + 2] = ASPHALT[2] + noise;
+      photo[o + 3] = 255;
+    }
+  }
+  return { tint, photo };
+}
+
+const SEAM_ROI = { x0: 0.1, x1: 0.9, y0: 0.2, y1: 1 };
+
+test('a clean LOD seam is one straight line and a z-fought one is ragged', () => {
+  const clean = seamFrames();
+  const lines = groundSeamLines(clean.tint, clean.photo, SEAM_W, SEAM_H, SEAM_ROI);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].key, '1-3');
+  assert.ok(lines[0].rmsPx < 0.5, `rms ${lines[0].rmsPx}`);
+  assert.ok(lines[0].teeth < 0.05);
+  assert.ok(Math.abs(lines[0].slope - 0.25) < 0.02);
+  const torn = seamFrames({ ragged: true });
+  const tornLines = groundSeamLines(torn.tint, torn.photo, SEAM_W, SEAM_H, SEAM_ROI);
+  assert.equal(tornLines.length, 1);
+  assert.ok(tornLines[0].rmsPx > 3, `rms ${tornLines[0].rmsPx}`);
+  // A facade stripe that is orange in the photograph too is not tile paint.
+  const stripe = seamFrames();
+  for (let i = 0; i < stripe.photo.length; i += 4) {
+    stripe.photo[i] = stripe.tint[i];
+    stripe.photo[i + 1] = stripe.tint[i + 1];
+    stripe.photo[i + 2] = stripe.tint[i + 2];
+  }
+  assert.equal(groundSeamLines(stripe.tint, stripe.photo, SEAM_W, SEAM_H, SEAM_ROI).length, 0);
+  const flat = seamFrames();
+  for (let i = 0; i < flat.tint.length; i += 4) {
+    flat.tint[i] = GREEN[0];
+    flat.tint[i + 1] = GREEN[1];
+    flat.tint[i + 2] = GREEN[2];
+  }
+  assert.equal(groundSeamLines(flat.tint, flat.photo, SEAM_W, SEAM_H, SEAM_ROI).length, 0, 'one owner has no seam');
+});
+
+test('anti-aliased blends between two bands are not a third owner', () => {
+  const frame = seamFrames();
+  for (let y = 0; y < SEAM_H; y++) {
+    const x = Math.round(90 + 0.25 * y);
+    const o = (y * SEAM_W + x) * 4;
+    frame.tint[o] = 235;
+    frame.tint[o + 1] = 215;
+    frame.tint[o + 2] = 60;
+  }
+  const lines = groundSeamLines(frame.tint, frame.photo, SEAM_W, SEAM_H, SEAM_ROI);
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].key, '1-3');
+});
+
+function seamCapture(overrides = {}) {
+  const before = seamFrames({ ragged: true, grit: 2 });
+  const after = seamFrames({ grit: 2 });
+  // The teeth are where the finer photograph now wins: those pixels change.
+  for (let y = 0; y < SEAM_H; y++) {
+    for (let x = 60; x < 130; x++) {
+      const o = (y * SEAM_W + x) * 4;
+      if (before.tint[o] !== after.tint[o]) {
+        before.photo[o] += 40;
+        before.photo[o + 1] += 36;
+        before.photo[o + 2] += 30;
+      }
+    }
+  }
+  return {
+    live: true,
+    ownership: 'tiles',
+    width: SEAM_W,
+    height: SEAM_H,
+    beforeTint: before.tint,
+    before: before.photo,
+    afterTint: after.tint,
+    after: after.photo,
+    ...overrides
+  };
+}
+
+test('digit1GroundSeams passes only a live frame whose seam went from torn to straight', () => {
+  const live = digit1GroundSeams(seamCapture());
+  assert.equal(live.reason, 'live-seam');
+  assert.equal(live.pass, true);
+  assert.ok(live.seam.raggedBefore - live.seam.raggedAfter >= 1);
+  assert.ok(live.seam.raggedAfter <= HK_GROUND_SEAM_RAGGED_CEIL);
+  assert.ok(live.seam.bandMad >= HK_GROUND_SEAM_BAND_MAD);
+  assert.equal(digit1GroundSeams().pass, false);
+  assert.equal(digit1GroundSeams(seamCapture({ live: false })).reason, 'live-msi-required');
+  assert.equal(digit1GroundSeams(seamCapture({ synthetic: true })).pass, false);
+  assert.equal(digit1GroundSeams(seamCapture({ ownership: 'megascans' })).reason, 'ownership-open');
+  assert.equal(digit1GroundSeams(seamCapture({ ownership: 'procedural' })).pass, false);
+  assert.equal(digit1GroundSeams(seamCapture({ ownership: 'infrastructure' })).pass, true);
+  const blank = digit1GroundSeams(seamCapture({ after: new Uint8ClampedArray(SEAM_W * SEAM_H * 4).fill(0) }));
+  assert.equal(blank.reason, 'blank-frame');
+  const none = seamFrames();
+  assert.equal(digit1GroundSeams(seamCapture({ afterTint: none.tint, beforeTint: none.tint, after: none.photo, before: none.photo })).pass, false, 'a seam that was already clean did not improve');
+});
+
+test('digit1GroundSeams refuses a seam that is still torn, unchanged, or absent', () => {
+  const torn = seamFrames({ ragged: true, grit: 2 });
+  const stillTorn = digit1GroundSeams(seamCapture({ afterTint: torn.tint, after: torn.photo }));
+  assert.equal(stillTorn.pass, false);
+  assert.equal(stillTorn.reason, 'seam-open');
+  const same = seamFrames({ grit: 2 });
+  const unchanged = digit1GroundSeams(seamCapture({ beforeTint: same.tint, before: same.photo }));
+  assert.equal(unchanged.pass, false, 'a seam that was already straight did not improve');
+  const flat = seamFrames();
+  for (let i = 0; i < flat.tint.length; i += 4) {
+    flat.tint[i] = GREEN[0];
+    flat.tint[i + 1] = GREEN[1];
+    flat.tint[i + 2] = GREEN[2];
+  }
+  assert.equal(digit1GroundSeams(seamCapture({ afterTint: flat.tint })).reason, 'no-seam');
+  const quiet = seamCapture();
+  quiet.before = new Uint8ClampedArray(quiet.after);
+  const below = digit1GroundSeams(quiet);
+  assert.equal(below.pass, false);
+  assert.equal(below.reason, 'band-below-floor');
+});
+
+test('seam band masks and masked metrics follow the fitted line', () => {
+  const frame = seamFrames({ grit: 3 });
+  const [seam] = groundSeamLines(frame.tint, frame.photo, SEAM_W, SEAM_H, SEAM_ROI);
+  const mask = groundSeamBandMask(seam, SEAM_W, SEAM_H, SEAM_ROI, 5);
+  let inside = 0;
+  for (const v of mask) inside += v;
+  assert.ok(inside > 0 && inside <= (SEAM_H * 11));
+  assert.equal(mask[(SEAM_H - 1) * SEAM_W + Math.round(seam.intercept + seam.slope * (SEAM_H - 1))], 1);
+  assert.equal(mask[(SEAM_H - 1) * SEAM_W + 2], 0);
+  const brighter = new Uint8ClampedArray(frame.photo);
+  for (let i = 0; i < brighter.length; i += 4) brighter[i] += 6;
+  assert.ok(Math.abs(maskedMad(frame.photo, brighter, mask) - 2) < 1e-9);
+  assert.ok(maskedGrain(frame.photo, SEAM_W, SEAM_H, mask) > 0);
+  assert.equal(maskedMad(frame.photo, frame.photo, new Uint8Array(mask.length)), 0);
+});
+
+test('the mount ranks overlapping tiles and keeps the grain bars out of the seam cut', () => {
+  const page = read('js/hk-ground-tiles.js');
+  assert.match(page, /groundTileLift\(gsdCm, eyeGsd\)/);
+  assert.match(page, /resolveGroundPriority/);
+  assert.match(page, /groundTintBand/);
+  assert.match(page, /hkGsdCm/);
+  // Cut #45's reconstruction, the far-frame Soft-grain work and Soft paint are not reopened.
+  const photo = read('js/hk-ground-photo.js');
+  assert.match(photo, /HK_GROUND_PHOTO_SHARPEN/);
+  assert.doesNotMatch(photo, /gsd|lift|tint/i);
+  const frame = read('js/hk-ground-tiles-frame.js');
+  assert.doesNotMatch(frame, /landsdFarGrain|landsdFarChart|farGrain|mapillary/i);
+  assert.doesNotMatch(read('tools/digit1-ground-seam.mjs'), /writeFileSync|fillRect|putImageData/);
+  assert.match(read('tools/digit1-ground-seams.html'), /OrthographicCamera/);
 });
