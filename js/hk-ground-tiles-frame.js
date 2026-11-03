@@ -33,6 +33,9 @@ const IDENTITY = Object.freeze([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1])
 const A_WGS = 6378137;
 const E2_WGS = 6.69437999014e-3;
 
+// Cut #47: the LandsD aerial ground tiles are opt-in. Default Digit1 eye is the
+// game deck (HkRoadCentrelines, HkSidewalks, HkCurbs, lane paint, HkOsmPavement).
+// ?groundTiles=on (or 1/true) mounts the tiles and punches the deck as #41 did.
 export function resolveGroundTilesRequest(href) {
   let flag = '';
   try {
@@ -40,8 +43,8 @@ export function resolveGroundTilesRequest(href) {
   } catch {
     flag = '';
   }
-  if (flag === 'off' || flag === '0') return null;
-  return { enabled: true };
+  if (flag === 'on' || flag === '1' || flag === 'true') return { enabled: true };
+  return null;
 }
 
 // ?groundPhoto=plain keeps the bilinear MeshBasicMaterial read for a live A-B

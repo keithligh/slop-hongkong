@@ -105,6 +105,23 @@ const noise2D = Fn(([p]) => {
 });
 
 /**
+ * Stone chips on a jittered grid (Cut #47). x = chip coverage (1 inside a chip), y = a per-chip tone in 0..1.
+ * `cell` is the grid pitch in metres. Callers fade it out by the pixel footprint, so a distant road settles to
+ * its mean tone instead of shimmering.
+ */
+const stoneChips = Fn(([p, cell]) => {
+  const q = vec2(p).div(cell);
+  const id = floor(q);
+  const f = fract(q).sub(0.5);
+  const h1 = hash2D(id);
+  const h2 = hash2D(id.add(vec2(17.3, 5.1)));
+  const jitter = vec2(h1.sub(0.5), h2.sub(0.5)).mul(0.46);
+  const radius = h2.mul(0.16).add(0.2);
+  const body = smoothstep(radius, radius.mul(0.55), length(f.sub(jitter)));
+  return vec2(body, hash2D(id.add(vec2(3.7, 9.2))));
+});
+
+/**
  * Mikkelsen's Surface-Gradient Hardware Derivative Bump Mapping (ported from CityGeneratorUtils.js)
  * Wrapped in Fn() so `height` is evaluated once into a scalar parameter before dFdx/dFdy!
  */
@@ -1170,7 +1187,8 @@ function roadWetMasks(field, drainage = 0.0) {
  * midday, a few small pools at golden hour, slick and mirroring the lights at night. Water's Fresnel rides on metalness
  * (as for the rivers), so puddles reflect the street through SSR at grazing angles yet only darken seen from above.
  * Lane markings are separate geometry built from the road network (js/road-paint.js).
- * The Digit1 disc yields this shader to LandsD photo tiles. See docs/HK_GROUND_TILES_CUT.md.
+ * Digit1 ground is this deck by default (Cut #47); the LandsD aerial tiles are opt-in (?groundTiles=on).
+ * See docs/HK_GAME_GROUND_CUT.md.
  */
 function createRoadSurfaceMaterial() {
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1178,8 +1196,8 @@ function createRoadSurfaceMaterial() {
     roughness: 0.48
   });
 
-  const cAsphaltDark = color(0x2b2e33);
-  const cAsphaltLight = color(0x464a51);
+  const cAsphaltDark = color(0x4a4a4b);
+  const cAsphaltLight = color(0x747271);
 
   // Puddle field & wetness masks shared by every channel below (each node is generated once per fragment)
   const puddleField = roadPuddleField(positionWorld.x, positionWorld.z);
@@ -1192,7 +1210,8 @@ function createRoadSurfaceMaterial() {
   const viewDir = normalize(cameraPosition.sub(positionWorld));
   const waterFresnel = pow(float(1.0).sub(clamp(viewDir.y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
 
-  mat.aoNode = canyonSkyAONode();
+  // The carriageway is the widest opening the canyon has; the full canyon AO read it as black.
+  mat.aoNode = mix(canyonSkyAONode(), float(1.0), 0.4);
 
   mat.colorNode = Fn(() => {
     const wx = positionWorld.x;
@@ -1217,7 +1236,18 @@ function createRoadSurfaceMaterial() {
 
     // Water filling the pores darkens the surface: damp stains and pools most, the overall wet film a little.
     const wetDarkening = mix(mix(float(1.0), float(0.72), damp), float(0.6), puddle).mul(mix(float(1.0), float(0.8), film));
-    return baseAsphalt.mul(wetDarkening);
+    // Dense aggregate (Cut #47): bitumen binder between 8 mm and 25 mm chips, lighter and darker stones.
+    // Dry chips read at the avatar's feet; the wet film darkens and mutes them.
+    const coarseChips = stoneChips(vec2(wx, wz), float(0.024));
+    const fineChips = stoneChips(vec2(wx.add(3.1), wz.sub(7.7)), float(0.0105));
+    const coarseSeen = smoothstep(0.016, 0.006, pixelSize);
+    const fineSeen = smoothstep(0.008, 0.0028, pixelSize);
+    const chipLight = coarseChips.x.mul(coarseChips.y.sub(0.42)).mul(0.34).mul(coarseSeen)
+      .add(fineChips.x.mul(fineChips.y.sub(0.42)).mul(0.2).mul(fineSeen));
+    const binder = float(1.0).sub(float(0.16).mul(coarseSeen).mul(float(1.0).sub(coarseChips.x)));
+    const chipMute = mix(float(1.0), float(0.5), max(film.mul(0.7), puddle));
+    const aggregate = baseAsphalt.mul(binder).add(vec3(chipLight.mul(chipMute)));
+    return aggregate.mul(wetDarkening);
   })();
 
   mat.roughnessNode = Fn(() => {
@@ -1239,7 +1269,9 @@ function createRoadSurfaceMaterial() {
 
     const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.0032).mul(coarseFade);
     const fineGrit = noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0016).mul(fineFade);
-    return bumpNormal(coarseGrit.add(fineGrit).mul(float(1.0).sub(puddle)));
+    const chipRelief = stoneChips(vec2(wx, wz), float(0.024)).x.mul(0.0011).mul(smoothstep(0.016, 0.006, pixelSize))
+      .add(stoneChips(vec2(wx.add(3.1), wz.sub(7.7)), float(0.0105)).x.mul(0.0006).mul(smoothstep(0.008, 0.0028, pixelSize)));
+    return bumpNormal(coarseGrit.add(fineGrit).add(chipRelief).mul(float(1.0).sub(puddle)));
   })();
 
   mat.emissiveNode = Fn(() => {
@@ -1391,9 +1423,14 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
       gridLine(swZ, alongPeriod, jointHalf)
     ).mul(detail);
 
+    const swChips = stoneChips(vec2(swX, swZ), float(0.016));
+    const swChipSeen = smoothstep(0.012, 0.004, pixelSize);
+    const chipGrit = swChips.x.mul(swChips.y.sub(0.5)).mul(0.14).mul(swChipSeen).mul(detail);
+
     const baseConcrete = mix(cConcreteB, cConcreteA, tone)
       .mul(panelHash.sub(0.5).mul(0.16).add(1.0))
       .add(grit)
+      .add(chipGrit)
       .mul(mix(float(1.0), float(0.78), max(swWet.x, swPuddle)))
       .mul(mix(float(1.0), float(0.88), swWet.z));
 
@@ -1434,6 +1471,7 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
 /**
  * Granite kerb. Stones run along the ribbon (hkSpan length), about 0.9 m.
  * The vertical face is darker than the top so the upstand reads at eye height.
+ * Cut #47: pale granite with a lit arris, quartz speckle, a gutter-dirt foot, and joints that stay a line.
  */
 function createCurbMaterial() {
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1451,25 +1489,40 @@ function createCurbMaterial() {
   mat.colorNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(180.0, 16.0, camDist);
+    const pixelSize = length(fwidth(vec2(curbX, curbZ)));
 
+    // Granite: pale grey stones, each its own tone, with quartz and mica speckle that settles to the mean at range.
+    const stoneId = floor(curbZ.div(0.9));
+    const stoneTone = hash2D(vec2(stoneId, floor(positionWorld.x.mul(0.02)))).sub(0.5).mul(0.2).add(1.0);
     const tone = noise2D(vec2(curbX.mul(1.4), curbZ.mul(0.6)));
-    const speckle = noise2D(vec2(curbX.mul(18.0), curbZ.mul(18.0))).sub(0.5).mul(0.06).mul(detail);
-    const stone = mix(color(0x4c4c45), color(0x63635a), tone).add(speckle);
+    const stone = mix(color(0x8c8c85), color(0xaaa9a0), tone).mul(stoneTone);
+    const speckAt = stoneChips(vec2(curbX, curbZ), float(0.011));
+    const speckSeen = smoothstep(0.008, 0.003, pixelSize);
+    const speckle = speckAt.x.mul(speckAt.y.sub(0.5)).mul(0.34).mul(speckSeen);
 
-    const joints = gridLine(curbZ, 0.9, 0.008).mul(detail);
     const topFace = smoothstep(0.5, 0.85, normalWorldGeometry.y);
+    // Crisp arris: the long top edge catches light, the road face carries tyre grime and gutter dirt at its foot.
+    const sideEdge = float(0.5).sub(abs(positionGeometry.x)).mul(span.x);
+    const arris = smoothstep(0.014, 0.002, sideEdge).mul(topFace).mul(detail);
+    const gutterDirt = float(1.0).sub(smoothstep(0.02, 0.1, positionWorld.y)).mul(float(1.0).sub(topFace));
+    const joints = gridLine(curbZ, 0.9, 0.011).mul(detail);
     const wetFilm = smoothstep(0.2, 0.8, cityUniforms.uRoadWetness);
-    return mix(stone.mul(0.52), stone, topFace).mul(float(1.0).sub(joints.mul(0.5))).mul(mix(float(1.0), float(0.78), wetFilm));
+
+    const lit = stone.add(speckle).add(arris.mul(0.12));
+    const faced = mix(lit.mul(0.78), lit, topFace).mul(float(1.0).sub(gutterDirt.mul(0.28)));
+    return faced.mul(float(1.0).sub(joints.mul(0.62))).mul(mix(float(1.0), float(0.74), wetFilm));
   })();
 
-  mat.roughnessNode = mix(float(0.72), float(0.5), smoothstep(0.2, 0.8, cityUniforms.uRoadWetness));
+  mat.roughnessNode = mix(float(0.6), float(0.4), smoothstep(0.2, 0.8, cityUniforms.uRoadWetness));
 
   mat.normalNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(120.0, 12.0, camDist);
     const joints = gridLine(curbZ, 0.9, 0.008);
     const grain = noise2D(vec2(curbX.mul(5.5), curbZ.mul(5.5))).sub(0.5).mul(0.0022);
-    return bumpNormal(grain.sub(joints.mul(0.004)).mul(detail));
+    const pixelSize = length(fwidth(vec2(curbX, curbZ)));
+    const pitting = stoneChips(vec2(curbX, curbZ), float(0.011)).x.mul(-0.0007).mul(smoothstep(0.008, 0.003, pixelSize));
+    return bumpNormal(grain.add(pitting).sub(joints.mul(0.005)).mul(detail));
   })();
 
   return mat;

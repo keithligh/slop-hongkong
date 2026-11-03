@@ -40,7 +40,7 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x203040);
     window.__seams.stage = 'tiles';
-    const result = await mountHkGroundTiles(scene, renderer, { href: location.href });
+    const result = await mountHkGroundTiles(scene, renderer, { href: `${location.href}${location.search ? '&' : '?'}groundTiles=on` });
     scene.traverse((obj) => {
       if (!obj.isMesh) return;
       const position = obj.geometry.attributes.position;

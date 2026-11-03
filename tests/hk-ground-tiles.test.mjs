@@ -68,7 +68,7 @@ function roadBody() {
 test('road shader no longer draws NYC manhole lids', () => {
   const body = roadBody();
   assert.equal(/cManhole|isManhole|mhCell|ConEd|manhole/i.test(body), false);
-  assert.match(body, /return baseAsphalt\.mul\(wetDarkening\)/);
+  assert.match(body, /return aggregate\.mul\(wetDarkening\)/);
 });
 
 test('Digit1 eye round-trips through ECEF into the world frame', () => {
@@ -99,7 +99,8 @@ test('procedural deck yields only inside the Digit1 disc', () => {
   ]);
   assert.deepEqual(indexes, [0, 1]);
   assert.equal(resolveGroundTilesRequest('http://localhost/?groundTiles=off'), null);
-  assert.equal(resolveGroundTilesRequest('http://localhost/').enabled, true);
+  assert.equal(resolveGroundTilesRequest('http://localhost/'), null);
+  assert.equal(resolveGroundTilesRequest('http://localhost/?groundTiles=on').enabled, true);
 });
 
 test('tile walk keeps the mesh on the eye and skips a far sibling', async () => {

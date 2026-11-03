@@ -1,5 +1,7 @@
 # Digit1 ground — LandsD tile-based mesh
 
+> **Cut #47: this method is abandoned for the Digit1 eye.** Keith rejected the aerial-tile ground (Cuts #41, #45, #46) as an "alien world" on 2026-11-03. The tiles are no longer mounted by default and the deck is no longer punched: the default Digit1 ground is the game deck, see [HK_GAME_GROUND_CUT.md](HK_GAME_GROUND_CUT.md). The mount below is kept only behind `?groundTiles=on`, for far or debug views. Everything on this page that says "`?groundTiles=off` is the escape" is inverted: `off` is now the default. Do not spend further cuts on ownership, grain, seams, sharpening or LOD of these tiles. Soft is not SD, and SD is not yet.
+
 Cut #41. The carriageway under `?at=-1.4,29.3,1.29` was procedural asphalt (`createRoadSurfaceMaterial`) with cast-iron manhole lids left over from the New York shader. That is not a photograph of Des Voeux. This cut mounts the Lands Department 3D Visualisation Map (tile-based models) under that eye and yields the procedural deck where the tiles land.
 
 The plan is [plans/cut41-sd-ground.md](../plans/cut41-sd-ground.md).
@@ -14,7 +16,7 @@ The tileset is the public Cesium 3D Tiles endpoint:
 https://data.map.gov.hk/api/3d-data/3dtiles/f2/tileset.json
 ```
 
-The page uses the example key published on the CSDI 3D Visualisation Map API page. `?groundTiles=off` leaves the procedural deck in place. The walk keeps leaf b3dm tiles whose box centre is within 42 m of the Digit1 eye and whose half-extent is at most 24 m, capped at 72 tiles. Vertices are Y-up in the tile frame, converted to ECEF, then into the Statue Square world (x east, z south). The low tail of heights within 8 m of the eye is shifted onto the asphalt at y = 0.07 so the photograph sits on the same ground the chase walks.
+The page uses the example key published on the CSDI 3D Visualisation Map API page. From Cut #47 the mount runs only with `?groundTiles=on`; without it the procedural deck stays in place (before #47 the escape was `?groundTiles=off`). The walk keeps leaf b3dm tiles whose box centre is within 42 m of the Digit1 eye and whose half-extent is at most 24 m, capped at 72 tiles. Vertices are Y-up in the tile frame, converted to ECEF, then into the Statue Square world (x east, z south). The low tail of heights within 8 m of the eye is shifted onto the asphalt at y = 0.07 so the photograph sits on the same ground the chase walks.
 
 Textures are KTX2 embedded as `image/ktx2`, not `KHR_texture_basisu`. The page decodes that buffer with the three.js KTX2 transcoder and draws the photograph unlit (`hkGroundTilePhoto`), the same way the PlanD aerial is shown as captured. A triangle whose centroid is above y = 1.8 and inside a mounted Individualised BUILDING box is dropped, so those charts stay in front. The ground band inside the box stays.
 
@@ -112,6 +114,15 @@ The MSI call stays with the live pair on that machine. Soft is not SD, SD is not
 - The mesh is an oblique aerial. Kerb paint and aggregate are coarser than a phone photograph at this eye. LOD changes between tiles are visible: after Cut #46 the seam is a straight line and not a tooth edge, but the 2.1 cm to 4.0 cm step across it is the source's, and the host serves no finer tile for the north half of the carriageway. The seam is not feathered: the tiles overlap by 0.2 to 0.3 m at most and a cross-fade there would be a few pixels wide.
 - The vertical snap is one offset for the disc. A real step in the mesh is kept; the whole plate moves so the low tail meets the sidewalk.
 - Charts win only inside mounted BUILDING boxes, and only above the ground band. An aerial facade with no individualised chart stays.
-- The example API key and the tileset can change. `?groundTiles=off` is the escape.
+- The example API key and the tileset can change. From Cut #47 the tiles are opt-in (`?groundTiles=on`), so the default page does not depend on them.
 - Cut #40 far-frame Soft live A-B is a different change and is not in this mount.
 - Cut #45: the carriageway tile is about 2 cm per texel and ETC1S-compressed. The reconstruction sharpens the kerb line and paving joints it has, and it can also raise block edges in the asphalt. It cannot add detail the aerial did not capture; a phone photograph at this eye still resolves more.
+
+## Cut #47 — abandoned for the Digit1 eye
+
+Plan: [plans/cut47-sd-digit1-game-ground.md](../plans/cut47-sd-digit1-game-ground.md). The Soft bars on this page (`digit1GroundOwnership`, `digit1GroundResiduals`, `digit1GroundSeams`) passed on frames that Keith's eye called an alien world: an oblique aerial carpet at 2 to 5 cm per texel, with no phone asphalt, granite kerb, tram paint or sidewalk life, and it hid the LandsD / OSM street that was already map-true. A Soft PASS is not the Keith eye.
+
+- Default: no tileset fetch, no `HkGroundTiles`, no yielded deck. `resolveGroundTilesRequest` returns null unless `?groundTiles=on` (or `1`, `true`).
+- Opt-in: `?groundTiles=on` is the #46 mount, byte for byte, with the #45 / #46 switches. It is a debug and far-view escape, not a direction.
+- The bars and their tests stay so the opt-in mount stays checkable. They are not extended.
+- The tools that mount tiles (`digit1-ground-mount.html`, `digit1-ground-seams.html`) add `groundTiles=on` themselves.

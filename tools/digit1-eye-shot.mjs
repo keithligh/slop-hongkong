@@ -4,6 +4,7 @@
 //   node tools/digit1-eye-shot.mjs artifacts/eye-east.png --query 'at=-1.4,29.3,1.29&landsdAniso=1'
 //   node tools/digit1-eye-shot.mjs before.png --root /tmp/before --hide-hud
 //   node tools/digit1-eye-shot.mjs seams.png --page tools/digit1-ground-seams.html --query 'ppm=40'
+// --owner-json FILE saves window.__digit1GameGround (first-hit mesh at the eye, Cut #47).
 // --root serves another checkout (the BEFORE tip of a live A-B). --hide-hud
 // drops the DOM panels so a ground crop scores the scene, not the HUD.
 
@@ -180,8 +181,19 @@ async function main() {
       });
     }
     await sleep(1500);
-    if (!groundMounted && !/groundTiles=(off|0)/.test(query) && existsSync(path.join(root, 'js/hk-ground-tiles.js'))) {
+    // Tiles are opt-in from Cut #47 (?groundTiles=on). A BEFORE checkout at 03d4ab0 mounts them by default.
+    const hasGameGround = existsSync(path.join(root, 'js/hk-game-ground.js'));
+    const tilesWanted = hasGameGround ? /groundTiles=(on|1|true)/.test(query) : !/groundTiles=(off|0)/.test(query);
+    if (!groundMounted && tilesWanted && existsSync(path.join(root, 'js/hk-ground-tiles.js'))) {
       throw new Error('ground tiles did not mount (tileset fetch failed); this frame is not a ground crop');
+    }
+    if (groundMounted && hasGameGround && !tilesWanted) {
+      throw new Error('ground tiles mounted without ?groundTiles=on; the default Digit1 eye must be the game deck');
+    }
+    if (hasGameGround) {
+      const owner = await send('Runtime.evaluate', { expression: 'JSON.stringify(window.__digit1GameGround || null)', returnByValue: true });
+      console.log(`[game-ground] ${owner.result?.result?.value}`);
+      if (argValue('--owner-json')) writeFileSync(path.resolve(repoRoot, argValue('--owner-json')), owner.result?.result?.value || 'null');
     }
     if (page !== 'index.html') {
       const info = await send('Runtime.evaluate', { expression: 'JSON.stringify(window.__seams)', returnByValue: true });

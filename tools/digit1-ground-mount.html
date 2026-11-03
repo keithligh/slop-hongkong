@@ -34,7 +34,7 @@
     await renderer.init();
     out.textContent = 'tiles';
     const scene = new THREE.Scene();
-    const result = await mountHkGroundTiles(scene, renderer, { href: location.href });
+    const result = await mountHkGroundTiles(scene, renderer, { href: `${location.href}${location.search ? '&' : '?'}groundTiles=on` });
     let textured = 0;
     let nearest = Infinity;
     const maps = [];
