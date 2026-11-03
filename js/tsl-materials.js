@@ -1192,12 +1192,14 @@ function roadWetMasks(field, drainage = 0.0) {
  */
 function createRoadSurfaceMaterial() {
   const mat = new THREE.MeshStandardNodeMaterial({
-    metalness: 0.24,
-    roughness: 0.48
+    metalness: 0.0,
+    roughness: 0.92
   });
 
-  const cAsphaltDark = color(0x4a4a4b);
-  const cAsphaltLight = color(0x747271);
+  // Warm bitumen. The carriageway faces the blue sky light; a neutral charcoal
+  // lands as a navy void under ACES. These two stay a grey road in that shade.
+  const cAsphaltDark = color(0x6e6256);
+  const cAsphaltLight = color(0x8a7d6e);
 
   // Puddle field & wetness masks shared by every channel below (each node is generated once per fragment)
   const puddleField = roadPuddleField(positionWorld.x, positionWorld.z);
@@ -1210,67 +1212,55 @@ function createRoadSurfaceMaterial() {
   const viewDir = normalize(cameraPosition.sub(positionWorld));
   const waterFresnel = pow(float(1.0).sub(clamp(viewDir.y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
 
-  // The carriageway is the widest opening the canyon has; the full canyon AO read it as black.
-  mat.aoNode = mix(canyonSkyAONode(), float(1.0), 0.4);
+  // The carriageway is the opening of the canyon. Full crevice AO, plus ACES,
+  // turned the asphalt into a black-blue hole. 0.72 keeps the shade without the void.
+  mat.aoNode = mix(canyonSkyAONode(), float(1.0), 0.72);
 
   mat.colorNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const camDist = length(positionWorld.sub(cameraPosition));
-    const detail = smoothstep(240.0, 22.0, camDist);
 
-    // Two-scale aggregate grit, patchwork pours, oily wear stains & tar crack seams
-    const microAggregate = mix(float(0.5), noise2D(vec2(wx.mul(16.0), wz.mul(16.0))), smoothstep(0.06, 0.02, pixelSize));
-    const fineGrain = mix(float(0.5), noise2D(vec2(wx.mul(3.2), wz.mul(3.2))), smoothstep(0.4, 0.12, pixelSize));
-    const patchNoise = noise2D(vec2(wx.mul(0.18), wz.mul(0.18)));
-    const oilyStain = smoothstep(0.52, 0.84, noise2D(vec2(wx.mul(0.42), wz.mul(0.42)))).mul(detail);
-    const tarSeam = float(1.0).sub(smoothstep(0.0, 0.04, abs(patchNoise.sub(0.52)))).mul(0.42).mul(detail);
+    // Footprint-filtered fine tone only. The old 5 m pours, oil stains and tar
+    // seams were the wavy terrain under the Digit1 eye.
+    const fineGrain = mix(float(0.5), noise2D(vec2(wx.mul(3.2), wz.mul(3.2))), smoothstep(0.25, 0.08, pixelSize));
+    const baseAsphalt = mix(cAsphaltDark, cAsphaltLight, fineGrain.mul(0.08).add(0.42));
 
-    const baseAsphalt = mix(
-      cAsphaltDark,
-      cAsphaltLight,
-      fineGrain.mul(0.36).add(microAggregate.mul(0.22)).add(patchNoise.mul(0.26))
-    )
-      .mul(float(1.0).sub(oilyStain.mul(0.32)))
-      .mul(float(1.0).sub(tarSeam));
-
-    // Water filling the pores darkens the surface: damp stains and pools most, the overall wet film a little.
-    const wetDarkening = mix(mix(float(1.0), float(0.72), damp), float(0.6), puddle).mul(mix(float(1.0), float(0.8), film));
-    // Dense aggregate (Cut #47): bitumen binder between 8 mm and 25 mm chips, lighter and darker stones.
-    // Dry chips read at the avatar's feet; the wet film darkens and mutes them.
+    // A damp stain, not a hole. Pools still darken; the film barely does.
+    const wetDarkening = mix(mix(float(1.0), float(0.9), damp), float(0.82), puddle).mul(mix(float(1.0), float(0.94), film));
     const coarseChips = stoneChips(vec2(wx, wz), float(0.024));
     const fineChips = stoneChips(vec2(wx.add(3.1), wz.sub(7.7)), float(0.0105));
     const coarseSeen = smoothstep(0.016, 0.006, pixelSize);
     const fineSeen = smoothstep(0.008, 0.0028, pixelSize);
-    const chipLight = coarseChips.x.mul(coarseChips.y.sub(0.42)).mul(0.34).mul(coarseSeen)
-      .add(fineChips.x.mul(fineChips.y.sub(0.42)).mul(0.2).mul(fineSeen));
-    const binder = float(1.0).sub(float(0.16).mul(coarseSeen).mul(float(1.0).sub(coarseChips.x)));
-    const chipMute = mix(float(1.0), float(0.5), max(film.mul(0.7), puddle));
+    const chipLight = coarseChips.x.mul(coarseChips.y.sub(0.5)).mul(0.06).mul(coarseSeen)
+      .add(fineChips.x.mul(fineChips.y.sub(0.5)).mul(0.03).mul(fineSeen));
+    const binder = float(1.0).sub(float(0.04).mul(coarseSeen).mul(float(1.0).sub(coarseChips.x)));
+    const chipMute = mix(float(1.0), float(0.7), max(film.mul(0.5), puddle));
     const aggregate = baseAsphalt.mul(binder).add(vec3(chipLight.mul(chipMute)));
     return aggregate.mul(wetDarkening);
   })();
 
   mat.roughnessNode = Fn(() => {
-    const microRough = mix(float(0.04), noise2D(positionWorld.xz.mul(12.0)).mul(0.08), smoothstep(0.08, 0.03, pixelSize));
-    const wetRough = mix(float(0.90).add(microRough), float(0.38), max(film.mul(0.9), damp.mul(0.8)));
-    return mix(wetRough, float(0.1), puddle);
+    const microRough = mix(float(0.02), noise2D(positionWorld.xz.mul(12.0)).mul(0.03), smoothstep(0.08, 0.03, pixelSize));
+    // Stay matte. A roughness of 0.38 on the damp film was a blue sky mirror at the eye.
+    const wetRough = mix(float(0.94).add(microRough), float(0.78), damp.mul(0.45));
+    return mix(wetRough, float(0.28), puddle);
   })();
 
-  // Water's Fresnel (F0 = 0.02): weights SSR & trades diffuse for reflection in pools (fully) and the wet film (partly)
-  mat.metalnessNode = clamp(waterFresnel.mul(1.6), 0.0, 0.85).mul(max(puddle, film.mul(0.6)));
+  // Standing water may mirror. The damp film must not, or the lane reads as liquid.
+  mat.metalnessNode = clamp(waterFresnel.mul(0.8), 0.0, 0.4).mul(puddle);
 
-  // Footprint-gated 3mm + 1.6mm asphalt aggregate relief via bumpNormal (from CityGenerator.js)
-  // Flattens to mirror-smooth 0.0 inside standing rainwater puddles so SSR reflections stay crisp!
+  // Sub-millimetre relief only. The old 3 mm waves became horizontal liquid bands
+  // once the street filled the view.
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
     const coarseFade = smoothstep(0.08, 0.025, pixelSize);
     const fineFade = smoothstep(0.02, 0.006, pixelSize).mul(float(1.0).sub(film.mul(0.6)));
 
-    const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.0032).mul(coarseFade);
-    const fineGrit = noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0016).mul(fineFade);
-    const chipRelief = stoneChips(vec2(wx, wz), float(0.024)).x.mul(0.0011).mul(smoothstep(0.016, 0.006, pixelSize))
-      .add(stoneChips(vec2(wx.add(3.1), wz.sub(7.7)), float(0.0105)).x.mul(0.0006).mul(smoothstep(0.008, 0.0028, pixelSize)));
+    const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.00025).mul(coarseFade);
+    const fineGrit = noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0001).mul(fineFade);
+    const chipRelief = stoneChips(vec2(wx, wz), float(0.024)).x.mul(0.00015).mul(smoothstep(0.016, 0.006, pixelSize))
+      .add(stoneChips(vec2(wx.add(3.1), wz.sub(7.7)), float(0.0105)).x.mul(0.00008).mul(smoothstep(0.008, 0.0028, pixelSize)));
     return bumpNormal(coarseGrit.add(fineGrit).add(chipRelief).mul(float(1.0).sub(puddle)));
   })();
 
@@ -1287,7 +1277,7 @@ function createRoadSurfaceMaterial() {
     const neonCol = mix(color(0xff2a85), color(0x2ad4ff), neonPatch).mul(0.32);
     const reflectCol = mix(skyMirror, neonCol, tsDist.mul(0.65));
 
-    return reflectCol.mul(max(puddle, film.mul(0.35))).mul(roadFresnel).mul(cityUniforms.uInteriorGlow).mul(0.07);
+    return reflectCol.mul(puddle).mul(roadFresnel).mul(cityUniforms.uInteriorGlow).mul(0.04);
   })();
 
   return mat;
@@ -1359,11 +1349,13 @@ function createLaneStripeMaterial(hex) {
   })();
   mat.roughnessNode = Fn(() => {
     const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z));
-    return mix(float(0.46), float(0.2), max(wet.z, wet.y));
+    return mix(float(0.62), float(0.4), max(wet.z.mul(0.35), wet.y));
   })();
+
+  // Paint stays paint. A wet-film metalness turned the double yellow into a sky mirror.
   mat.metalnessNode = Fn(() => {
     const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z));
-    return clamp(wet.y.mul(0.55).add(wet.z.mul(0.2)), 0.0, 0.65);
+    return clamp(wet.y.mul(0.18), 0.0, 0.18);
   })();
   return mat;
 }
@@ -1383,8 +1375,8 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
     roughness: 0.92
   });
 
-  const cConcreteA = color(0x9a9488);
-  const cConcreteB = color(0x6f6a62);
+  const cConcreteA = color(0xc4b8a6);
+  const cConcreteB = color(0x9a8e7c);
   const acrossPeriod = 0.45;
   const alongPeriod = 0.9;
   const jointHalf = 0.022;
@@ -1407,7 +1399,8 @@ function createSidewalkMaterial({ ribbon = true } = {}) {
   const swPuddle = swWet.y.mul(smoothstep(0.5, 0.9, normalWorldGeometry.y));
   const swFresnel = pow(float(1.0).sub(clamp(normalize(cameraPosition.sub(positionWorld)).y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
 
-  mat.aoNode = canyonSkyAONode();
+  // Same opening as the carriageway. Crevice AO had the flags reading as a blue void.
+  mat.aoNode = mix(canyonSkyAONode(), float(1.0), 0.7);
 
   mat.colorNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
@@ -1484,7 +1477,8 @@ function createCurbMaterial() {
   const curbX = mix(positionWorld.x, positionGeometry.x.mul(span.x), onRibbon);
   const curbZ = mix(positionWorld.z, positionGeometry.z.mul(span.y), onRibbon);
 
-  mat.aoNode = canyonSkyAONode();
+  // Pale granite has to survive the same blue shade. Crevice AO buried the upstand.
+  mat.aoNode = mix(canyonSkyAONode(), float(1.0), 0.82);
 
   mat.colorNode = Fn(() => {
     const camDist = length(positionWorld.sub(cameraPosition));
@@ -1493,9 +1487,9 @@ function createCurbMaterial() {
 
     // Granite: pale grey stones, each its own tone, with quartz and mica speckle that settles to the mean at range.
     const stoneId = floor(curbZ.div(0.9));
-    const stoneTone = hash2D(vec2(stoneId, floor(positionWorld.x.mul(0.02)))).sub(0.5).mul(0.2).add(1.0);
+    const stoneTone = hash2D(vec2(stoneId, floor(positionWorld.x.mul(0.02)))).sub(0.5).mul(0.12).add(1.0);
     const tone = noise2D(vec2(curbX.mul(1.4), curbZ.mul(0.6)));
-    const stone = mix(color(0x8c8c85), color(0xaaa9a0), tone).mul(stoneTone);
+    const stone = mix(color(0xc8c2b6), color(0xe6e2d8), tone).mul(stoneTone);
     const speckAt = stoneChips(vec2(curbX, curbZ), float(0.011));
     const speckSeen = smoothstep(0.008, 0.003, pixelSize);
     const speckle = speckAt.x.mul(speckAt.y.sub(0.5)).mul(0.34).mul(speckSeen);

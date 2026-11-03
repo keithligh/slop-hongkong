@@ -205,6 +205,22 @@ test('Cut #47 does not reopen the tiles method, the far frame, paint, Mapillary 
   assert.doesNotMatch(read('js/tsl-materials.js'), /mapillary|megascans/i);
 });
 
+test('Digit1 carriageway stays matte asphalt and the kerb stays open granite', () => {
+  const source = read('js/tsl-materials.js');
+  const road = source.slice(source.indexOf('function createRoadSurfaceMaterial'), source.indexOf('function createRoadPaintMaterial'));
+  // Macro pours and a grazing sky mirror were the liquid bands under the eye.
+  assert.equal(/oilyStain|tarSeam|wx\.mul\(0\.18\)/.test(road), false);
+  assert.match(road, /mix\(canyonSkyAONode\(\), float\(1\.0\), 0\.72\)/);
+  assert.match(road, /\.mul\(puddle\)/);
+  assert.match(road, /return aggregate\.mul\(wetDarkening\)/);
+  const kerb = source.slice(source.indexOf('function createCurbMaterial'), source.indexOf('Tileable wind-wave texture'));
+  assert.match(kerb, /mix\(canyonSkyAONode\(\), float\(1\.0\), 0\.82\)/);
+  const walk = source.slice(source.indexOf('function createSidewalkMaterial'), source.indexOf('function createCurbMaterial'));
+  assert.match(walk, /mix\(canyonSkyAONode\(\), float\(1\.0\), 0\.7\)/);
+  const stripe = source.slice(source.indexOf('function createLaneStripeMaterial'), source.indexOf('function createSidewalkMaterial'));
+  assert.match(stripe, /wet\.y\.mul\(0\.18\)/);
+});
+
 test('road, kerb and walk materials carry the Cut #47 stone read and keep the wet field', () => {
   const source = read('js/tsl-materials.js');
   assert.match(source, /const stoneChips = Fn/);
