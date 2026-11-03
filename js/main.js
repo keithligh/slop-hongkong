@@ -13,6 +13,7 @@ import { DIGIT1_PROBE_SAMPLES, isPaleRgb, ndcToReadPixel, parseDigit1ProbeReques
 import { runDigit1Probe } from './digit1-probe.js';
 import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
 import { mountHkGroundTiles } from './hk-ground-tiles.js';
+import { probeDigit1GameGround } from './hk-game-ground.js';
 import { buildStreetDetails } from './street-details.js';
 import { createTrafficSystem, createHighwayTraffic } from './traffic.js';
 import { buildRoadPaint } from './road-paint.js';
@@ -144,6 +145,10 @@ async function initApp() {
     groundCredit.title = groundMount.attribution;
   }
   markInit('groundTiles');
+  // Default Digit1 ground is the game deck. The probe reads which mesh a down-ray meets.
+  const gameGround = probeDigit1GameGround([cityGrid.group, groundMount.group]);
+  window.__digit1GameGround = gameGround;
+  console.info(`[game-ground] eye ${gameGround.owner} tiles ${gameGround.tiles} mounted ${gameGround.tilesMounted} ${gameGround.rows.map((row) => `${row.label}:${row.name || '-'}`).join(' ')}`);
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...gltfBuildings.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
 
   const streetDetails = buildStreetDetails(scene, gltfPlan);

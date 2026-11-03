@@ -31,6 +31,7 @@ import {
 // Open3DHK tile-based mesh under the Digit1 disc. Individualised BUILDING
 // charts stay in front above the sidewalk. The procedural deck yields inside
 // the same disc once a photographed tile is actually on the eye.
+// Cut #47: opt-in only (?groundTiles=on). The default Digit1 eye is the game deck.
 
 const DECK_NAMES = new Set(HK_GROUND_DECK_NAMES);
 
