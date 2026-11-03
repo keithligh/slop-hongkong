@@ -59,7 +59,7 @@ function help() {
   return `Usage: node tools/fetch-pland-central.mjs [--format OBJ|OSGB|CESIUM] [--tiles tile_21_26,tile_22_26] [--out hk-3d/pland]
 
 Queries ${PLAND_TILES_API} at the Digit1 corridor (Des Voeux eye, then every 125 m along heading 1.29).
-OBJ zips are clipped to that corridor and written as glTF the page loads by default. ?pland=off leaves it unmounted. ?pland=compare is the A-B.
+OBJ zips are clipped to that corridor and written as glTF. The default eye does not load them. ?pland=donor mounts the clip. ?pland=compare is the A-B.
 OSGB and CESIUM zips are downloaded only. The page does not load them.
 hk-3d/ is gitignored. A missing manifest leaves LandsD individualised meshes as they are.`;
 }

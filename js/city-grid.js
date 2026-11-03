@@ -252,19 +252,19 @@ function buildHkStreetCanyon(group, gltfPlan = null) {
     sidewalk: ISLAND_BOUNDS.sidewalkHeight,
     solids: lookSolids
   }) : walls;
-  // Retail and curtain both yield in the Digit1 corridor while PlanD is mounted.
-  // HkCentralStreetWalls is the orange/black shopfront canyon in that view.
-  const plandOn = gltfPlan?.plandMode === 'donor' || gltfPlan?.plandMode === 'compare';
-  const shownWalls = omitPlandCorridorGlass(walls, { enabled: plandOn });
+  // Digit1 corridor shopfront and curtain stay omitted on the default page.
+  // HkCentralStreetWalls is the orange/black toy canyon. PlanD is not mounted
+  // there, so these ribbons must not come back in its place.
+  const shownWalls = omitPlandCorridorGlass(walls, { enabled: true });
   const ribbons = shownWalls.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
-  const glassShown = omitPlandCorridorGlass(glass, { enabled: plandOn });
+  const glassShown = omitPlandCorridorGlass(glass, { enabled: true });
   const glassRibbons = glassShown.map((wall) => ({ x: wall.x, z: wall.z, yaw: wall.yaw, w: wall.depth, len: wall.len }));
   const baseY = 0.16;
   const baseH = Math.max(0.4, HK_RETAIL_BELT - baseY);
   const glassH = Math.max(0.4, HK_CANYON_HEIGHT - baseH);
   addHkRibbonMesh(group, retailMat, ribbons, baseY, baseH, 'HkCentralStreetWalls', 1);
   addHkRibbonMesh(group, wallMat, glassRibbons, HK_RETAIL_BELT, glassH, 'HkCentralStreetWallsGlass', 1);
-  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; retail ${shownWalls.length} glass ${glass.length} look, ${glassShown.length} after PlanD corridor`);
+  console.info(`[ground] Central street walls ${plan.walls.length} kept ${walls.length} after LandsD overlap; retail ${shownWalls.length} glass ${glass.length} look, ${glassShown.length} after Digit1 corridor omit`);
   return walls.map((wall) => ({
     minX: wall.minX,
     maxX: wall.maxX,

@@ -225,8 +225,7 @@ function buildStreetDetails(scene, gltfPlan = null) {
     eye: HK_STREET_EYE,
     near: HK_STREET_NEAR
   } : {});
-  const plandOn = gltfPlan?.plandMode === 'donor' || gltfPlan?.plandMode === 'compare';
-  const shown = omitPlandCorridorGlass(walls, { enabled: plandOn });
+  const shown = omitPlandCorridorGlass(walls, { enabled: true });
   const neon = planHkCanyonNeon(shown);
   addInstancedSigns(group, neon.signs, true);
   addArms(group, neon.arms);

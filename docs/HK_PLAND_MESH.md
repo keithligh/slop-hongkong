@@ -1,6 +1,6 @@
 # PlanD photo-realistic mesh — Central corridor
 
-The Des Voeux chase loads a Planning Department 3D Photo-realistic Model as a street-corridor donor. The mesh is real PlanD capture. It is on without `?pland=donor`. `?pland=off` leaves the procedural corridor, including the non-pale shopfront. LandsD photographs stay mounted in the donor mode. While the clip is mounted, both the curtain and the retail shopfront yield inside the Digit1 corridor. That shopfront is `HkCentralStreetWalls` / `hkRetailPodium` / `hkShopfrontAlbedo`: orange tile, black mouth, red and green sign bands. Left in place it is the near orange/black toy canyon, in front of the photograph. A ribbon outside the corridor still keeps it. Neon on a yielded ribbon is not hung.
+The Des Voeux chase does not mount the Planning Department 3D Photo-realistic Model on the default eye. The mesh is real March 2017 aerial capture, and that surface is the melted near wall. `?pland=donor` (or `?pland=1`) opts in. `?pland=off` is the same as the default. LandsD photographs stay mounted. The Digit1 corridor omits both the curtain and the retail shopfront whether or not the clip is mounted, so those ribbons do not take the aerial's place. That shopfront is `HkCentralStreetWalls` / `hkRetailPodium` / `hkShopfrontAlbedo`: orange tile, black mouth, red and green sign bands. Left in place it is the near orange/black toy canyon, in front of the photograph. A ribbon outside the corridor still keeps it. Neon on a yielded ribbon is not hung.
 
 This is not a claim that the chase looks like Sleeping Dogs. A headless frame of the default eye is `artifacts/digit1-eye-east-sbs.png` (tip b0e2460 beside this cut). On that probe, NDC 0, −0.08 stays the shopfront RGB(91, 24, 22). NDC 0, 0.08 is Henderson photo RGB(44, 47, 61). NDC 0, 0 is PlanD photo RGB(49, 59, 53), not pale. The grid has no pale lit pixel. Those centre samples miss the left and right canyon. The shopfront there is the ribbon this cut omits while PlanD is mounted. Keith’s veto frame, not NDC 0, is the bar.
 
@@ -20,7 +20,7 @@ The right flank is outside that corridor. A centroid within 4 m outside a mounte
 
 The Digit1 mid-band is a separate chartless plate. The eye hits near (84.9, 14.7, 77.3), (80.9, 18.3, 71.1), and (141.2, 21.6, 44.1) are not inside a LandsD ring. A fresh check of the Active footprints still finds none on those points: the Bank of China Building is about 25–29 m from the right hits, Cheung Kong Center about 39 m, and the left hit is the 2017 Murray Road gap, about 56 m from the nearest lot and about 84 m from CCB Tower. The mounted chase charts miss those rays. A bounds pass of every BUILDING glTF on 11-SW-9C and 11-SW-14A (2026-10-25) still leaves the hits outside every mesh, including the Bank of China Tower chart on 14A. Cut #36 added 11-SW-8D and 11-SW-13B and still found no mesh on the plates, so there is no glTF to pin. Donor mode omits a centroid in two look-frame plates below world y 64: right, along 82–112 m and side 16.5–27 m; left, along 128–162 m and side −36 to −16.5 m. That side band starts outside the ±16 m mid-road corridor. The right plate stays off the ray to the Bank of China Tower. The centre ray to The Henderson stays off the left plate. The mount line is `[pland] omitted N triangles on the Digit1 mid-band chartless plate`. The same plates are `HkMidbandCanyon` on the donor page and on `?pland=off`: an opaque shopfront up to the retail belt (plinth, dark mouths, enamel sign bands) and a window grid above it. Flat stone courses are not that face. The right plate overlaps Des Voeux OSM frontage; the left plate does not, and the shared stand-in is not a 2024 Murray podium. Compare hides those walls and does not run the omit. They are not `hkCorridorPodiumFill`, not `hkShopfrontAlbedo`, and not curtain glass. Soft `centre_low` past Henderson and the soft `right_mid_low` apron stay. The Bank of China Tower is still not a LandsD photograph. Sleeping Dogs is not claimed.
 
-Canyon glass and the retail shopfront inside that same corridor are omitted while the clip is mounted, so neither `hkCanyonGlass` nor `hkShopfrontAlbedo` is a toy band in front of the photograph. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor that omit, and the shopfront stays non-pale. Unknown values, including any street-view bake, leave PlanD off.
+Canyon glass and the retail shopfront inside that same corridor are omitted on the default page, so neither `hkCanyonGlass` nor `hkShopfrontAlbedo` is a toy band in front of a LandsD photograph. `?pland=compare` does not mount the LandsD meshes, so the same cameras are an A-B of the aerial corridor against the usual page. `?pland=off` mounts neither the clip nor the shopfront. Unknown values, including any street-view bake, leave PlanD off.
 
 ## Not a street-view atlas
 
@@ -70,7 +70,7 @@ Horizontal placement then uses the same path as the LandsD sheets: HK1980 grid �
 
 Vertical placement does not snap the mesh minimum to the sidewalk. The config bounds include HKPD down to about −188 m, and that minimum would put the street in the sky. The pavement datum is the 10th percentile of HKPD within 18 m of the Des Voeux eye. World y is `(HKPD − that datum) + sidewalk` (sidewalk 0.22 m). Tiles that do not contain the eye reuse the eye tile’s datum. If no tile has pavement samples there, the tool stops rather than invent a height.
 
-The glTF stores Altizure local positions. The page applies `model_transform` and the datum when it mounts the mesh, which is the same function the tests check. About 1.56 million triangles is a heavy page load. It is the Digit1 default because that is the street the chase looks at. `?pland=off` skips the request.
+The glTF stores Altizure local positions. The page applies `model_transform` and the datum when it mounts the mesh, which is the same function the tests check. About 1.56 million triangles is a heavy page load. It is not the Digit1 default. `?pland=donor` requests it. The default eye does not.
 
 ## Measured clip
 
@@ -83,16 +83,16 @@ The glTF stores Altizure local positions. The page applies `model_transform` and
 | tile_21_26 | 703,058 | 49,106 | 1,426,871 | x −8.1…241.9, z 28.2…174.7, y 0.14…285 |
 | tile_22_26 | 857,179 | 110,877 | 448,278 | x 241.9…490.5, z 28.2…237.2 |
 
-The Des Voeux eye (x −1.4, z 29.3) sits inside the `tile_21_26` box. The Henderson footprint (about x 218…264) straddles the tile edge at x ≈ 242, so the west of that site is `tile_21_26` and the east, with Fairmont House and Lippo Centre, is `tile_22_26`. The glTF buffers match their declared lengths and each tile keeps the four PlanD JPEGs. The clip is the capture’s own triangles, not a decimated stand-in. About 1.56 million triangles is a heavy page load. It is the Digit1 default. `?pland=off` does not request it.
+The Des Voeux eye (x −1.4, z 29.3) sits inside the `tile_21_26` box. The Henderson footprint (about x 218…264) straddles the tile edge at x ≈ 242, so the west of that site is `tile_21_26` and the east, with Fairmont House and Lippo Centre, is `tile_22_26`. The glTF buffers match their declared lengths and each tile keeps the four PlanD JPEGs. The clip is the capture’s own triangles, not a decimated stand-in. About 1.56 million triangles is a heavy page load. It is not the Digit1 default. `?pland=off` does not request it, and neither does the bare eye URL.
 
 ## Page
 
-Default: request `hk-3d/pland/manifest.json` and mount the clip as a donor when it is present. A missing manifest leaves LandsD as it is.
+Default: do not request `hk-3d/pland/manifest.json`. `?pland=donor` mounts the clip when the manifest is present. A missing manifest leaves LandsD as it is.
 
 | Query | What mounts |
 | --- | --- |
-| (none), `?pland=donor`, `?pland=1` | LandsD photographs, PlanD corridor behind them, corridor curtain and shopfront omitted, near right footprint belt in chart ashlar |
-| `?pland=0`, `?pland=off` | LandsD only. Corridor curtain stays |
+| (none), `?pland=0`, `?pland=off` | LandsD photographs. PlanD stays unmounted. Corridor curtain and shopfront stay omitted |
+| `?pland=donor`, `?pland=1`, `?pland=on` | LandsD photographs, PlanD corridor behind them, corridor curtain and shopfront omitted |
 | `?pland=compare`, `?pland=ab` | PlanD corridor, LandsD individualised meshes left unmounted |
 
 While a PlanD manifest is loaded, footprint extrudes whose boxes sit in the Digit1 corridor are hidden, so the corridor is not glass in front of the aerial mesh. Donor mode then puts back only the belt of the near right-hand plates, capped at the retail belt, in chart ashlar. The tower above that belt stays hidden. Compare mode does not put the belt back. Gap walls outside that corridor are unchanged. The continuous mesh is not given a solid collider. A box around it would close Des Voeux.
@@ -130,7 +130,7 @@ The right half of that eye (NDC x 0.2 to 0.95, y −0.35 to 0.15) falls from mea
 
 The south station (`?at=-1.4,35.3,1.29`) is `artifacts/digit1-eye-east-kerb-south.png`. Its right half has mean luma about 51 and no pale pixels. NDC 0.45, −0.15 is (40, 39, 36). NDC 0, −0.08 is (240, 168, 92), the shelter plate from that station.
 
-The corridor shopfront omit is `artifacts/digit1-eye-east-canyon.png` (swiftshader, LandsD manifests absent, PlanD `tile_21_26` mounted). The mount log keeps 2026 of 2145 retail ribbons and drops 9774 carriageway/sidewalk triangles. NDC 0, 0 is PlanD photo about RGB(50, 60, 53). The right street band (NDC x 0.72–1, y 0.30–0.78) falls from about 24% shopfront orange/red/green to under 1%. The same eye with `?pland=off` puts the ribbons back (retail 2145) and the right band returns to that 24%. Sleeping Dogs is not claimed. Keith’s full frame, not NDC 0, is the bar.
+The corridor shopfront omit is `artifacts/digit1-eye-east-canyon.png` (swiftshader, LandsD manifests absent, PlanD `tile_21_26` mounted). The mount log keeps 2026 of 2145 retail ribbons and drops 9774 carriageway/sidewalk triangles. NDC 0, 0 is PlanD photo about RGB(50, 60, 53). The right street band (NDC x 0.72–1, y 0.30–0.78) falls from about 24% shopfront orange/red/green to under 1%. That frame's `?pland=off` put the ribbons back (retail 2145) and the right band returned to that 24%. The default eye no longer does: the corridor omit stays on when PlanD is unmounted. Sleeping Dogs is not claimed. Keith’s full frame, not NDC 0, is the bar.
 
 ## Attribution
 
