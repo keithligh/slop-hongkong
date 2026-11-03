@@ -80,8 +80,25 @@ First-hit rays at the eye: `HkLaneMarkingsWhite` (eye), `HkRoadCentrelines` (4 a
 - No phone grit presented as a photo of the street.
 - No Sleeping Dogs claim, no UE5.
 
+## Cut #48 — the deck was a navy void
+
+Keith's eye on the default page (this deck, not `?groundTiles=on`) still read as alien ground. Headless Digit1 `?at=-1.4,29.3,1.29`, 1280×633, HUD hidden, crops from `DIGIT1_GROUND_CROPS`:
+
+| Crop | Before luma | Before navy | After luma | After navy |
+| --- | --- | --- | --- | --- |
+| underfoot | 29.6 | 99% | 61.5 | 0% |
+| right-kerb | 42.0 | 87% | 85.0 | 0% |
+| road-ahead | 97.3 | 40% | 137.2 | 0% |
+
+Navy means `B > R + 12` and luma under 50. The right-kerb midline after the change is asphalt at luma 64 and the stone at about 134. The pair is [artifacts/digit1-road-read-sbs.png](../artifacts/digit1-road-read-sbs.png).
+
+The ribbons were already the LandsD centreline and the OSM walks. What failed was the shade: crevice AO on the kerb and the sidewalk, a neutral charcoal times the blue sky light, 5 m pour noise and a wet-film Fresnel that turned the lane into a wave. `createRoadSurfaceMaterial`, `createCurbMaterial`, `createSidewalkMaterial` and `createLaneStripeMaterial` now keep a matte warm asphalt, an open pale granite kerb, and concrete flags. Standing water can still mirror. The damp film cannot. No new texture bytes, no tile mount, no Soft-grain far work.
+
+This is still not a photograph of Des Voeux. Soft is not SD. SD NOT YET. Do not read the #47 `digit1GameGround` line above as a Keith-eye pass.
+
 ## Residual
 
-- The lighting at the eye is the existing golden-hour canyon: the road and kerb are in sky-lit shade and read blue-grey. Aggregate chips are visible underfoot and a few metres ahead; further out the asphalt is a mean tone with the existing mottling and wet film.
-- A procedural deck is a game street. The aerial tiles were a photograph of the wrong thing; this is not a photograph of the right one. Real Des Voeux asphalt, kerb paint and tram paint need a capture this cut did not wait for.
+- The carriageway is flat asphalt in blue shade, with a pale kerb and flag sidewalk. It is not phone grit and it is not the aerial tile.
+- `?groundTiles=on` is still the oblique `f2` photograph, and it still looks like melted terrain. It is not the default.
+- Tram rails and surveyed kerb paint are not in this extract. None were invented.
 - `?groundTiles=on` still depends on the CSDI example key and the `f2` tileset staying up.
