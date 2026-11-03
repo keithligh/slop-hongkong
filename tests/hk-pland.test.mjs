@@ -198,9 +198,9 @@ test('the corridor clip keeps a Des Voeux facade and drops the road and the sout
   assert.equal(quad.triangles, 2);
 });
 
-test('the Digit1 page mounts PlanD as a donor unless the query turns it off', () => {
-  assert.deepEqual(resolvePlandRequest('https://x/index.html'), { mode: 'donor' });
-  assert.deepEqual(resolvePlandRequest('https://x/index.html?at=-1.4,29.3,1.29'), { mode: 'donor' });
+test('the Digit1 page leaves PlanD unmounted unless the query opts in', () => {
+  assert.equal(resolvePlandRequest('https://x/index.html'), null);
+  assert.equal(resolvePlandRequest('https://x/index.html?at=-1.4,29.3,1.29'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=0'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=off'), null);
   assert.equal(resolvePlandRequest('https://x/index.html?pland=false'), null);
@@ -691,7 +691,7 @@ test('PlanD yields the Digit1 mid-band chartless plates and keeps the holds', ()
   assert.doesNotMatch(buildings, /hkShopfrontAlbedo|hkCorridorPodiumFill/);
 });
 
-test('corridor glass and the Digit1 shopfront ribbon both yield to PlanD', () => {
+test('corridor glass and the Digit1 shopfront ribbon stay omitted on the default eye', () => {
   const eye = HK_STREET_EYE;
   const forward = Math.sin(eye.heading);
   const ahead = Math.cos(eye.heading);
@@ -730,11 +730,13 @@ test('corridor glass and the Digit1 shopfront ribbon both yield to PlanD', () =>
   assert.equal(omitPlandCorridorGlass([gap], { enabled: true }).length, 0);
   assert.equal(omitPlandCorridorGlass([gap], { enabled: false }).length, 1);
   const grid = readFileSync(path.join(root, 'js/city-grid.js'), 'utf8');
-  assert.match(grid, /omitPlandCorridorGlass\(glass/);
-  assert.match(grid, /omitPlandCorridorGlass\(walls/);
+  assert.match(grid, /omitPlandCorridorGlass\(glass, \{ enabled: true \}\)/);
+  assert.match(grid, /omitPlandCorridorGlass\(walls, \{ enabled: true \}\)/);
+  assert.doesNotMatch(grid, /plandMode/);
   assert.match(grid, /retailMat, ribbons/);
   const streets = readFileSync(path.join(root, 'js/street-details.js'), 'utf8');
-  assert.match(streets, /omitPlandCorridorGlass\(walls/);
+  assert.match(streets, /omitPlandCorridorGlass\(walls, \{ enabled: true \}\)/);
+  assert.doesNotMatch(streets, /plandMode/);
   assert.match(streets, /planHkCanyonNeon\(shown\)/);
 });
 

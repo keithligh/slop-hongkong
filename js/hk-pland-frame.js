@@ -19,8 +19,9 @@ import { HK_CURB_W, HK_WALK_W } from './hk-road-deck.js';
 // is a row-major 4×4 that adds the HK1980 origin. The page then uses the same
 // HK1980 → Central ENU path as the LandsD sheets.
 // The mesh is one continuous surface per tile, not a building. The clip is the
-// Digit1 corridor, so the page mounts it as a donor unless ?pland=off (or an
-// unknown value). ?pland=compare still leaves the LandsD meshes unmounted.
+// Digit1 corridor. The default eye does not mount it: that aerial surface is
+// the melted near wall. ?pland=donor (or 1 / on) opts in. ?pland=compare still
+// leaves the LandsD meshes unmounted. Unknown values stay off.
 
 export const PLAND_TILES_API = 'https://pdmap.pland.gov.hk/plandapi/Tiles';
 export const PLAND_DATASET = 'https://data.gov.hk/en-data/dataset/hk-pland-pland1-3d-photo-realistic-model';
@@ -1006,8 +1007,9 @@ export function resolvePlandRequest(href) {
   }
   const query = raw.trim().toLowerCase();
   switch (query) {
-    // No flag: donor on the Digit1 clip. The chase URLs do not carry ?pland=donor.
+    // No flag: PlanD stays unmounted. The chase URLs do not carry ?pland=donor.
     case '':
+      return null;
     case '1':
     case 'on':
     case 'donor':
@@ -1026,10 +1028,11 @@ export function resolvePlandRequest(href) {
 }
 
 // Canyon ribbons in the Digit1 chase corridor. Glass and the retail shopfront
-// are the same kind of stand-in: while the PlanD clip is mounted, either one
-// hides the 2017 photograph. The retail mesh is HkCentralStreetWalls. Its atlas
-// is the orange tile, black mouth, and red/green sign bands. Pass that list
-// here too. ?pland=off leaves `enabled` false, so the non-pale shopfront stays.
+// are the same stand-in. The default page omits both, with or without the
+// PlanD clip: the 2017 mesh is not the near wall, and this atlas must not
+// replace it. The retail mesh is HkCentralStreetWalls. Its atlas is the orange
+// tile, black mouth, and red/green sign bands. Pass that list here too.
+// `enabled: false` keeps a ribbon (tests, and anything outside this call).
 // A ribbon outside the corridor keeps both faces. The 80 m LandsD disc is not
 // this test.
 export function omitPlandCorridorGlass(walls, {

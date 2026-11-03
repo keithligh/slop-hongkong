@@ -96,8 +96,9 @@ async function initApp() {
   }
 
   // 3. Hong Kong coast, footprint blocks, empty landmark slots, street details, and traffic.
-  // PlanD donor is the Digit1 default. LandsD stays in front. ?pland=off leaves the
-  // procedural corridor. Compare leaves the LandsD meshes unmounted.
+  // PlanD is not the Digit1 default. The 2017 aerial stays unmounted unless
+  // ?pland=donor. LandsD photographs are the near walls. Compare leaves those
+  // meshes unmounted. Corridor shopfront and canyon glass stay omitted either way.
   const plandPlan = await preparePlandCorridor(window.location.href);
   let gltfPlan = await prepareHkGltfSheet(window.location.href);
   if (plandPlan) {
