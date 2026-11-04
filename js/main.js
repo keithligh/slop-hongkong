@@ -3,6 +3,7 @@ import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { createPostProcessing } from './post-processing.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
+import { createWalkFence, parseWalkConfineRequest } from './walk-confine.js';
 import { getLocationLabel, isTypingInField, ROADS, PLACES, TELEPORT_LOCATIONS } from './city-config.js';
 import { buildCityGrid } from './city-grid.js';
 import { buildBoroughs } from './boroughs.js';
@@ -199,6 +200,24 @@ async function initApp() {
 
   // 4. Initialize Third-Person Controllers (Person, Car, Cyclist, Helicopter) & Multi-Camera System
   const controllerManager = new ThirdPersonControllerManager(scene, allColliders);
+  // Person-only walk fence: 50 m around the Digit1 eye. ?confine=off is the MSI/dev escape; ?confine=on draws the disc.
+  const walkConfine = parseWalkConfineRequest(window.location.href);
+  if (walkConfine.enabled) {
+    const walkFence = createWalkFence();
+    controllerManager.setWalkFence(walkFence);
+    if (walkConfine.debug) {
+      const ring = new THREE.LineLoop(
+        new THREE.BufferGeometry().setFromPoints(Array.from({ length: 128 }, (_, i) => {
+          const a = (i / 128) * Math.PI * 2;
+          return new THREE.Vector3(walkFence.x + Math.cos(a) * walkFence.radius, 0.3, walkFence.z + Math.sin(a) * walkFence.radius);
+        })),
+        new THREE.LineBasicMaterial({ color: 0xff3b30 })
+      );
+      ring.name = 'WalkFenceDebug';
+      ring.frustumCulled = false;
+      scene.add(ring);
+    }
+  }
   // Reuse teleport placement so saved players return at rest, close to their last positions.
   try {
     const saved = JSON.parse(localStorage.getItem('hk-player-state'));

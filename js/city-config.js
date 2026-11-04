@@ -240,6 +240,9 @@ const HK_GLTF_SHEET = HK_GLTF_SHEETS[0];
 // Person chase, heading 1.29 rad, looking east along the carriageway. A flyover is not this camera.
 const HK_STREET_EYE = Object.freeze({ x: -1.4, z: 29.3, heading: 1.29 });
 const HK_STREET_NEAR = 80;
+// Person walk fence around the eye. Tighter than HK_STREET_NEAR, which stays the overlay/procedural-hide disc.
+// The Bank of China Tower chart is scenery outside this disc; the fence never grows to include it.
+const HK_WALK_RADIUS = 50;
 const HK_GLTF_TEX_NEAR = 120;
 // The chase looks east-south-east. The Henderson is about 220 m down that ray,
 // Fairmont House about 290 m, Lippo Centre about 380 m. A disc of 120 m leaves
@@ -1018,6 +1021,7 @@ export {
   HK_GLTF_CAP,
   HK_STREET_EYE,
   HK_STREET_NEAR,
+  HK_WALK_RADIUS,
   HK_GLTF_TEX_NEAR,
   HK_GLTF_STREET_REACH,
   HK_GLTF_STREET_HALF,
