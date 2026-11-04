@@ -247,6 +247,8 @@ const HK_GLTF_TEX_NEAR = 120;
 // masses behind the camera stay on the far sampler.
 const HK_GLTF_STREET_REACH = 500;
 const HK_GLTF_STREET_HALF = 72;
+// Selected set for one boot. The loading overlay waits on the 80 m disc and
+// the Bank of China Tower chart, then the rest of this set mounts in the background.
 const HK_GLTF_CAP = 200;
 
 function hkCoreScale() {

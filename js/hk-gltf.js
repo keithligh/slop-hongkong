@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS } from './city-config.js';
 import {
   DIGIT1_FAR_CHASE,
+  HK_GLTF_MOUNT_WIDE,
   bakeGltfWorldTriangles,
   boxClosestDistance,
   formatGltfLog,
@@ -805,18 +806,34 @@ async function fetchLookSolid(entry) {
   return bakeGltfWorldTriangles(doc, buffers);
 }
 
+async function eachPool(items, width, fn) {
+  const list = items || [];
+  if (!list.length) return;
+  const limit = Math.max(1, Math.min(width | 0 || 1, list.length));
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      await fn(list[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: limit }, () => worker()));
+}
+
 export async function loadLookSolids(entries, eye = HK_STREET_EYE) {
   const solids = [];
-  for (const entry of entries || []) {
-    if (!entry?.url || !gltfInStreetChase(entry, eye)) continue;
-    if (boxClosestDistance(entry, eye) <= LOOK_SOLID_PAST) continue;
+  const wanted = (entries || []).filter((entry) => entry?.url
+    && gltfInStreetChase(entry, eye)
+    && boxClosestDistance(entry, eye) > LOOK_SOLID_PAST);
+  await eachPool(wanted, HK_GLTF_MOUNT_WIDE, async (entry) => {
     try {
       const solid = await fetchLookSolid(entry);
       if (solid) solids.push(solid);
     } catch (err) {
       console.warn(`[gltf] look solid ${entry.file || entry.url}: ${err.message || err}`);
     }
-  }
+  });
   return solids;
 }
 
@@ -887,131 +904,146 @@ export async function prepareHkGltfSheet(href) {
     ...entry,
     url: `./hk-3d/${entry.sheet}/${entry.file}`
   }));
-  const lookSolids = probe ? [] : await loadLookSolids(selected);
-  if (lookSolids.length) {
-    const triangles = lookSolids.reduce((sum, solid) => sum + solid.triangles.length / 9, 0);
-    console.info(`[gltf] look solids ${lookSolids.length} triangles ${triangles}`);
-  }
+  // Far-chase triangle bakes overlap the overlay gate. The city grid awaits
+  // the promise; the gate mount does not wait its turn behind those bins.
+  const lookPromise = probe ? Promise.resolve([]) : loadLookSolids(selected);
   return {
     ...plan,
     sheet: loadedSheets.join('+'),
     sheets: loadedSheets,
     hiddenIds: new Set(hidden),
     selected,
-    lookSolids
+    lookSolids: [],
+    lookPromise
   };
 }
 
-export async function mountHkGltfBuildings(scene, plan) {
-  if (!plan) return { colliders: [], loaded: 0, failed: 0, group: null };
-  const group = new THREE.Group();
-  group.name = 'HkIndividualModels';
+async function mountOneHkGltf(entry, group, colliders) {
   const loader = new GLTFLoader();
-  const colliders = [];
+  const gltf = await loader.loadAsync(entry.url);
+  gltf.scene.updateMatrixWorld(true);
+  let meshes = 0;
+  let nullDropped = 0;
+  let farSealed = 0;
+  const farChase = landsdFarChaseMesh(entry);
+  const farSampler = gltfAlbedoSampler(entry);
+  let farGrainLod = null;
+  let farChartUnlit = false;
+  const noteFarGrain = (material) => {
+    const list = Array.isArray(material) ? material : [material];
+    for (const mat of list) {
+      const lod = mat?.map?.userData?.hkFarGrainMaxLod;
+      if (Number.isFinite(lod)) farGrainLod = lod;
+      if (mat?.userData?.hkFarChartUnlit) farChartUnlit = true;
+    }
+  };
+  gltf.scene.traverse((obj) => {
+    if (!obj.isMesh) return;
+    const geo = bakeMesh(obj);
+    if (!geo) return;
+    let dropped = 0;
+    if (farChase) {
+      const seal = sealLandsdFarNullFill(geo, obj.material);
+      farSealed += seal.sealed;
+      dropped = seal.dropped;
+    } else {
+      dropped = omitLandsdNullFill(geo, obj.material);
+    }
+    nullDropped += dropped;
+    if (geo.drawRange.count === 0) {
+      geo.dispose();
+      return;
+    }
+    const sampler = farSampler;
+    const placeMesh = (partGeo, material) => {
+      const mesh = new THREE.Mesh(partGeo, material);
+      mesh.name = 'HkGltfBuilding';
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.hkBuildingId = buildingIdOf(entry);
+      mesh.userData.hkFile = entry.file || '';
+      mesh.userData.hkSheet = entry.sheet || '';
+      mesh.userData.hkSource = 'landsd';
+      mesh.userData.hkNullDropped = dropped;
+      group.add(mesh);
+      meshes++;
+    };
+    const pieces = splitLandsdOnEyeCharts(geo, obj.material, sampler);
+    if (!pieces) {
+      packLandsdChart(geo, obj.material, sampler);
+      sharpenPhoto(obj.material, sampler);
+      noteFarGrain(obj.material);
+      placeMesh(geo, obj.material);
+    } else {
+      // Atlas UVs already sit inside the replicated pad. A second crop
+      // would cut that pad off. Rest triangles still use the file.
+      geo.dispose();
+      const bins = pieces.filter((piece) => piece.atlas).length;
+      console.info(`[gltf] on-eye atlas ${obj.material?.name || ''} bins ${bins}`);
+      for (const piece of pieces) {
+        if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
+        sharpenPhoto(piece.material, sampler);
+        noteFarGrain(piece.material);
+        placeMesh(piece.geo, piece.material);
+      }
+    }
+  });
+  if (Number.isFinite(farGrainLod)) {
+    console.info(`[gltf] far-grain mip ${entry.file || entry.url} maxLod ${farGrainLod}`);
+  }
+  if (farChartUnlit) console.info(`[gltf] far-chart unlit ${entry.file || entry.url}`);
+  if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
+  if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
+  if (!meshes) throw new Error('no meshes');
+  colliders.push({
+    minX: entry.minX,
+    maxX: entry.maxX,
+    minZ: entry.minZ,
+    maxZ: entry.maxZ,
+    maxY: ISLAND_BOUNDS.sidewalkHeight + Math.max(0, entry.maxH - entry.minH)
+  });
+}
+
+export async function mountHkGltfBuildings(scene, plan, {
+  group: existingGroup = null,
+  colliders: existingColliders = null,
+  parallel = HK_GLTF_MOUNT_WIDE,
+  yieldTurn = false,
+  summarize = true
+} = {}) {
+  if (!plan) return { colliders: [], loaded: 0, failed: 0, group: null };
+  const group = existingGroup || new THREE.Group();
+  if (!existingGroup) group.name = 'HkIndividualModels';
+  const colliders = existingColliders || [];
   let loaded = 0;
   let failed = 0;
-  for (const entry of plan.selected) {
+  const entries = plan.selected || [];
+  await eachPool(entries, parallel, async (entry) => {
     try {
-      const gltf = await loader.loadAsync(entry.url);
-      gltf.scene.updateMatrixWorld(true);
-      let meshes = 0;
-      let nullDropped = 0;
-      let farSealed = 0;
-      const farChase = landsdFarChaseMesh(entry);
-      const farSampler = gltfAlbedoSampler(entry);
-      let farGrainLod = null;
-      let farChartUnlit = false;
-      const noteFarGrain = (material) => {
-        const list = Array.isArray(material) ? material : [material];
-        for (const mat of list) {
-          const lod = mat?.map?.userData?.hkFarGrainMaxLod;
-          if (Number.isFinite(lod)) farGrainLod = lod;
-          if (mat?.userData?.hkFarChartUnlit) farChartUnlit = true;
-        }
-      };
-      gltf.scene.traverse((obj) => {
-        if (!obj.isMesh) return;
-        const geo = bakeMesh(obj);
-        if (!geo) return;
-        let dropped = 0;
-        if (farChase) {
-          const seal = sealLandsdFarNullFill(geo, obj.material);
-          farSealed += seal.sealed;
-          dropped = seal.dropped;
-        } else {
-          dropped = omitLandsdNullFill(geo, obj.material);
-        }
-        nullDropped += dropped;
-        if (geo.drawRange.count === 0) {
-          geo.dispose();
-          return;
-        }
-        const sampler = farSampler;
-        const placeMesh = (partGeo, material) => {
-          const mesh = new THREE.Mesh(partGeo, material);
-          mesh.name = 'HkGltfBuilding';
-          mesh.castShadow = true;
-          mesh.receiveShadow = true;
-          mesh.userData.hkBuildingId = buildingIdOf(entry);
-          mesh.userData.hkFile = entry.file || '';
-          mesh.userData.hkSheet = entry.sheet || '';
-          mesh.userData.hkSource = 'landsd';
-          mesh.userData.hkNullDropped = dropped;
-          group.add(mesh);
-          meshes++;
-        };
-        const pieces = splitLandsdOnEyeCharts(geo, obj.material, sampler);
-        if (!pieces) {
-          packLandsdChart(geo, obj.material, sampler);
-          sharpenPhoto(obj.material, sampler);
-          noteFarGrain(obj.material);
-          placeMesh(geo, obj.material);
-        } else {
-          // Atlas UVs already sit inside the replicated pad. A second crop
-          // would cut that pad off. Rest triangles still use the file.
-          geo.dispose();
-          const bins = pieces.filter((piece) => piece.atlas).length;
-          console.info(`[gltf] on-eye atlas ${obj.material?.name || ''} bins ${bins}`);
-          for (const piece of pieces) {
-            if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
-            sharpenPhoto(piece.material, sampler);
-            noteFarGrain(piece.material);
-            placeMesh(piece.geo, piece.material);
-          }
-        }
-      });
-      if (Number.isFinite(farGrainLod)) {
-        console.info(`[gltf] far-grain mip ${entry.file || entry.url} maxLod ${farGrainLod}`);
-      }
-      if (farChartUnlit) console.info(`[gltf] far-chart unlit ${entry.file || entry.url}`);
-      if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
-      if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
-      if (!meshes) throw new Error('no meshes');
-      colliders.push({
-        minX: entry.minX,
-        maxX: entry.maxX,
-        minZ: entry.minZ,
-        maxZ: entry.maxZ,
-        maxY: ISLAND_BOUNDS.sidewalkHeight + Math.max(0, entry.maxH - entry.minH)
-      });
+      await mountOneHkGltf(entry, group, colliders);
       loaded++;
     } catch (err) {
       failed++;
       console.warn(`[gltf] skip ${entry.file || entry.url}: ${err.message}`);
     }
+    if (yieldTurn) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  if (group.children.length && !group.parent) scene.add(group);
+  if (summarize) {
+    const skipped = plan.skippedSpeck + plan.skippedOutside + plan.skippedCap + failed;
+    console.info(formatGltfLog({
+      sheet: plan.sheet,
+      loaded,
+      skipped,
+      skippedSpeck: plan.skippedSpeck,
+      skippedOutside: plan.skippedOutside,
+      skippedCap: plan.skippedCap,
+      hidden: plan.hiddenIds ? plan.hiddenIds.size : 0,
+      sidewalk: ISLAND_BOUNDS.sidewalkHeight
+    }));
+    if (plan.reason) console.info(`[gltf] ${plan.reason}`);
+  } else {
+    console.info(`[gltf] fill loaded ${loaded} failed ${failed}`);
   }
-  if (group.children.length) scene.add(group);
-  const skipped = plan.skippedSpeck + plan.skippedOutside + plan.skippedCap + failed;
-  console.info(formatGltfLog({
-    sheet: plan.sheet,
-    loaded,
-    skipped,
-    skippedSpeck: plan.skippedSpeck,
-    skippedOutside: plan.skippedOutside,
-    skippedCap: plan.skippedCap,
-    hidden: plan.hiddenIds ? plan.hiddenIds.size : 0,
-    sidewalk: ISLAND_BOUNDS.sidewalkHeight
-  }));
-  if (plan.reason) console.info(`[gltf] ${plan.reason}`);
   return { colliders, loaded, failed, group };
 }

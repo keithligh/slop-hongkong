@@ -1301,6 +1301,37 @@ export function planGltfManifest(manifest, {
   };
 }
 
+// Concurrent LandsD loads while the overlay is up. Image decode overlaps.
+// Each file's mesh walk still runs on the main thread when that download ends.
+export const HK_GLTF_MOUNT_WIDE = 4;
+
+// Overlay gate. The 80 m disc is the colonnade and the Bank of China Building
+// stone: that is the disc that already drops procedural extrudes. The tower
+// chart is about 189 m and still blocks the overlay, so the footprint prism
+// is not what the eye sees. Henderson and the rest of the cap-200 set mount
+// after the first frame.
+export function gltfBlocksLoadingOverlay(entry, eye = HK_STREET_EYE, near = HK_STREET_NEAR) {
+  if (!entry) return false;
+  const id = HK_BOC_PHOTO_CHART.id;
+  const name = String(entry.name || '');
+  const file = String(entry.file || '');
+  if (name === id || file.includes(id)) return true;
+  if (![entry.minX, entry.maxX, entry.minZ, entry.maxZ].every(Number.isFinite)) return false;
+  return boxClosestDistance(entry, eye) <= near;
+}
+
+export function partitionGltfBoot(selected, { eye = HK_STREET_EYE, gateAll = false } = {}) {
+  const list = Array.isArray(selected) ? selected : [];
+  if (gateAll) return { gate: list.slice(), fill: [] };
+  const gate = [];
+  const fill = [];
+  for (const entry of list) {
+    if (gltfBlocksLoadingOverlay(entry, eye)) gate.push(entry);
+    else fill.push(entry);
+  }
+  return { gate, fill };
+}
+
 export function hiddenExtrudeIds(blocks, meshes, {
   margin = 2,
   eye = HK_STREET_EYE,

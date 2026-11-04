@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
+import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, HK_STREET_NEAR, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import { digit1FarFrameFidelity, keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
@@ -22,11 +22,15 @@ import {
   formatGltfLog,
   gltfCoversFootprint,
   bakeGltfWorldTriangles,
+  boxClosestDistance,
   clampLandsdAnisotropy,
   gltfAlbedoSampler,
   gltfInStreetChase,
+  gltfBlocksLoadingOverlay,
   gltfStreetPhoto,
   gltfTextureMaxEdge,
+  HK_GLTF_MOUNT_WIDE,
+  partitionGltfBoot,
   hiddenExtrudeIds,
   isLandsdAtlasGutter,
   isLandsdNullTexel,
@@ -214,6 +218,55 @@ test('the page loads the Central street sheets unless a query names one', () => 
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=manhattan'), null);
   assert.equal(resolveHkGltfRequest('https://x/index.html', { configured: '11-SW-9B', sheets: [] }).sheet, '11-SW-9B');
   assert.equal(resolveHkGltfRequest('https://x/index.html?gltf=11-SW-9A', { configured: '11-SW-9B' }).sheet, '11-SW-9A');
+});
+
+test('the loading overlay waits on the near Digit1 walls, then fills the cap', () => {
+  assert.equal(HK_GLTF_CAP, 200);
+  assert.equal(HK_STREET_NEAR, 80);
+  assert.equal(HK_GLTF_MOUNT_WIDE, 4);
+  const colonnade = { name: 'B344751569101063A0', minX: -66.9, maxX: 13.4, minZ: 29.2, maxZ: 102.1, span: 80 };
+  const bocBuilding = { name: 'B345471572201063A0', minX: 12.9, maxX: 55.4, minZ: 49.8, maxZ: 95.7, span: 42 };
+  const bocTower = { ...HK_BOC_PHOTO_CHART, name: HK_BOC_PHOTO_CHART.id };
+  const henderson = { name: 'B347491569901063A0', minX: 218, maxX: 264, minZ: 54, maxZ: 105, span: 46 };
+  const behind = { name: 'behind', minX: -220, maxX: -160, minZ: 0, maxZ: 50, span: 60 };
+  const fx = Math.sin(HK_STREET_EYE.heading);
+  const fz = Math.cos(HK_STREET_EYE.heading);
+  const along = (dist, name) => {
+    const x = HK_STREET_EYE.x + dist * fx;
+    const z = HK_STREET_EYE.z + dist * fz;
+    return { name, minX: x, maxX: x, minZ: z, maxZ: z };
+  };
+  assert.equal(gltfBlocksLoadingOverlay(colonnade), true);
+  assert.equal(gltfBlocksLoadingOverlay(bocBuilding), true);
+  assert.equal(boxClosestDistance(bocBuilding, HK_STREET_EYE) <= HK_STREET_NEAR, true);
+  assert.equal(gltfBlocksLoadingOverlay(bocTower), true);
+  assert.equal(boxClosestDistance(bocTower, HK_STREET_EYE) > HK_STREET_NEAR, true);
+  assert.equal(gltfBlocksLoadingOverlay(henderson), false);
+  assert.equal(gltfBlocksLoadingOverlay(behind), false);
+  assert.equal(gltfBlocksLoadingOverlay(along(70, 'inside')), true);
+  assert.equal(gltfBlocksLoadingOverlay(along(100, 'outside')), false);
+  const boot = partitionGltfBoot([colonnade, bocBuilding, bocTower, henderson, behind]);
+  assert.deepEqual(boot.gate.map((entry) => entry.name), [colonnade.name, bocBuilding.name, bocTower.name]);
+  assert.deepEqual(boot.fill.map((entry) => entry.name), [henderson.name, behind.name]);
+  const probed = partitionGltfBoot([henderson, behind], { gateAll: true });
+  assert.equal(probed.gate.length, 2);
+  assert.equal(probed.fill.length, 0);
+  const main = readFileSync(path.join(root, 'js/main.js'), 'utf8');
+  const hide = main.indexOf("loadingOverlay.classList.add('hidden')");
+  const fillCall = main.indexOf('startHkGltfFill()', hide);
+  assert.ok(hide > 0 && fillCall > hide);
+  assert.equal(main.includes('await startHkGltfFill'), false);
+  assert.match(main, /partitionGltfBoot/);
+  assert.match(main, /gateAll: digit1ProbeRequest\.enabled/);
+  assert.match(main, /mode === 'compare'/);
+  assert.match(main, /preparePlandCorridor/);
+  assert.match(main, /compareLandsd/);
+  const wide = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(wide, /HK_GLTF_MOUNT_WIDE/);
+  assert.match(wide, /yieldTurn/);
+  assert.match(wide, /new GLTFLoader\(\)/);
+  const controllers = readFileSync(path.join(root, 'js/controllers.js'), 'utf8');
+  assert.match(controllers, /_colliderCount !== this\.colliders\.length/);
 });
 
 test('boot wires the sheet ahead of the extrude and preloads the frame', () => {
