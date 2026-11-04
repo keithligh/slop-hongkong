@@ -9,6 +9,7 @@ import { buildBoroughs } from './boroughs.js';
 import { buildLandmarks } from './landmarks.js';
 import { buildCityBlocks } from './buildings.js';
 import { mountHkGltfBuildings, prepareHkGltfSheet, setLandsdAnisotropyLimit } from './hk-gltf.js';
+import { partitionGltfBoot } from './hk-gltf-frame.js';
 import { DIGIT1_PROBE_SAMPLES, isPaleRgb, ndcToReadPixel, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
 import { runDigit1Probe } from './digit1-probe.js';
 import { hidePlandCorridorExtrudes, mountPlandCorridor, preparePlandCorridor } from './hk-pland.js';
@@ -108,8 +109,25 @@ async function initApp() {
     gltfPlan = hidePlandCorridorExtrudes(gltfPlan);
     gltfPlan.plandMode = plandPlan.mode;
   }
-  if (loadingStatus && gltfPlan?.selected?.length && plandPlan?.mode !== 'compare') {
+  // The probe's three ray buildings have to be up before it reads pixels.
+  // The default eye does not: Henderson and the off-look cap fill later.
+  const digit1ProbeRequest = parseDigit1ProbeRequest(window.location.href);
+  const boot = partitionGltfBoot(gltfPlan?.selected, { gateAll: digit1ProbeRequest.enabled });
+  const compareLandsd = plandPlan?.mode === 'compare';
+  if (loadingStatus && boot.gate.length && !compareLandsd) {
     loadingStatus.textContent = '正在載入地政總署單體建築模型…';
+  }
+  if (gltfPlan) console.info(`[gltf] overlay gate ${boot.gate.length} fill ${boot.fill.length}`);
+  const gltfMount = compareLandsd
+    ? Promise.resolve({ colliders: [], loaded: 0, failed: 0, group: null })
+    : mountHkGltfBuildings(scene, gltfPlan ? { ...gltfPlan, selected: boot.gate } : null);
+  if (gltfPlan?.lookPromise) {
+    gltfPlan.lookSolids = await gltfPlan.lookPromise;
+    const solids = gltfPlan.lookSolids || [];
+    if (solids.length) {
+      const triangles = solids.reduce((sum, solid) => sum + solid.triangles.length / 9, 0);
+      console.info(`[gltf] look solids ${solids.length} triangles ${triangles}`);
+    }
   }
   const cityGrid = buildCityGrid(scene, gltfPlan);
   markInit('cityGrid');
@@ -119,10 +137,8 @@ async function initApp() {
   markInit('landmarks');
   const cityBlocks = buildCityBlocks(scene, gltfPlan);
   markInit('blocks');
-  const gltfBuildings = plandPlan?.mode === 'compare'
-    ? { colliders: [], loaded: 0, failed: 0, group: null }
-    : await mountHkGltfBuildings(scene, gltfPlan);
-  if (plandPlan?.mode === 'compare') console.info('[pland] compare: LandsD individualised meshes stay off');
+  const gltfBuildings = await gltfMount;
+  if (compareLandsd) console.info('[pland] compare: LandsD individualised meshes stay off');
   markInit('gltf');
   if (loadingStatus && plandPlan) loadingStatus.textContent = '正在載入規劃署三維實景（中環街廊）…';
   const plandMount = await mountPlandCorridor(scene, plandPlan, gltfPlan?.selected || []);
@@ -151,6 +167,21 @@ async function initApp() {
   window.__digit1GameGround = gameGround;
   console.info(`[game-ground] eye ${gameGround.owner} tiles ${gameGround.tiles} mounted ${gameGround.tilesMounted} ${gameGround.rows.map((row) => `${row.label}:${row.name || '-'}`).join(' ')}`);
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...gltfBuildings.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
+  let gltfFillStarted = false;
+  // One file at a time, and a turn between files, so the frame can paint.
+  function startHkGltfFill() {
+    if (gltfFillStarted || compareLandsd || !gltfPlan || !boot.fill.length) return;
+    gltfFillStarted = true;
+    mountHkGltfBuildings(scene, { ...gltfPlan, selected: boot.fill }, {
+      group: gltfBuildings.group,
+      colliders: allColliders,
+      parallel: 1,
+      yieldTurn: true,
+      summarize: false
+    }).catch((err) => {
+      console.warn(`[gltf] fill ${err.message || err}`);
+    });
+  }
 
   const streetDetails = buildStreetDetails(scene, gltfPlan);
   markInit('streetDetails');
@@ -185,7 +216,6 @@ async function initApp() {
   // Street proof is the person chase at eye height. A flyover frame is not acceptance.
   // index.html?at=-1.4,29.3,1.29 stands on Des Voeux looking east.
   // ?probe=digit1 reads those pixels back to the mesh that drew them.
-  const digit1ProbeRequest = parseDigit1ProbeRequest(window.location.href);
   try {
     const at = new URL(window.location.href).searchParams.get('at');
     if (at) {
@@ -792,8 +822,10 @@ async function initApp() {
       Promise.resolve(device && device.queue.onSubmittedWorkDone()).catch(() => {}).then(() => {
         markInit('gpu');
         console.log(`[init] ${initTimings.join(', ')}`);
-        initTimings = null;
         if (loadingOverlay) loadingOverlay.classList.add('hidden');
+        startHkGltfFill();
+        console.info(`[gltf] overlay hidden ${Math.round(performance.now())}ms ${initTimings.join(', ')}`);
+        initTimings = null;
         audioSystem.ready = true;
         setLoadingProgress(1);
       });

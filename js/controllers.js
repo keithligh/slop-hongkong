@@ -797,12 +797,15 @@ class ThirdPersonControllerManager {
   }
 
   // The colliders whose bounds come within `r` of (x, z), in their original order. They never move, so they are
-  // bucketed once into 48 m cells (tens of thousands of buildings: testing them all every frame cost ~0.5 ms)
+  // bucketed into 48 m cells (tens of thousands of buildings: testing them all every frame cost ~0.5 ms).
+  // A LandsD fill mount appends colliders after the first frame, which rebuilds the grid. The stamp is not reset:
+  // a recycled stamp would skip a collider that still carries the old value.
   nearColliders(x, z, r) {
     const CELL = 48;
     const key = (ix, iz) => (ix + 4096) * 8192 + (iz + 4096);
-    if (!this._colliderCells) {
+    if (!this._colliderCells || this._colliderCount !== this.colliders.length) {
       this._colliderCells = new Map();
+      this._colliderCount = this.colliders.length;
       this.colliders.forEach((c, i) => {
         c._order = i;
         for (let ix = Math.floor(c.minX / CELL); ix <= Math.floor(c.maxX / CELL); ix++) {
@@ -814,8 +817,8 @@ class ThirdPersonControllerManager {
           }
         }
       });
-      this._nearList = [];
-      this._nearStamp = 0;
+      if (!this._nearList) this._nearList = [];
+      if (!this._nearStamp) this._nearStamp = 0;
     }
     const out = this._nearList;
     out.length = 0;
