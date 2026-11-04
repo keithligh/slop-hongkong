@@ -9,6 +9,7 @@ import {
   streetZ,
   TELEPORT_LOCATIONS
 } from './city-config.js';
+import { confineToWalkFence } from './walk-confine.js';
 import { cityUniforms, createCarPaintMaterial, createContactShadowMaterial } from './tsl-materials.js';
 import {
   BODY_SPECS,
@@ -126,6 +127,7 @@ class ThirdPersonControllerManager {
     this.scene = scene;
     this.colliders = colliders;
     this._colliderCells = null; // built on first use, see nearColliders()
+    this.walkFence = null; // { x, z, radius } person-only disc, set by main; null leaves the person free
     this.activeMode = 'car'; // 'person' | 'car' | 'cyclist' | 'helicopter'
 
     this.keys = {
@@ -258,6 +260,30 @@ class ThirdPersonControllerManager {
   setMode(mode) {
     if (!this.entities[mode]) return;
     this.activeMode = mode;
+    if (mode === 'person') this.returnPersonToWalkFence();
+  }
+
+  setWalkFence(fence) {
+    this.walkFence = fence || null;
+    if (this.walkFence) this.returnPersonToWalkFence();
+  }
+
+  // Person only. Car, bike and helicopter ignore the fence.
+  confineWalkPoint(x, z) {
+    return confineToWalkFence(this.walkFence, x, z);
+  }
+
+  // The idle pedestrian drifts while another mode is driven, so Digit1 can arrive from outside the disc.
+  returnPersonToWalkFence() {
+    const p = this.entities?.person;
+    if (!this.walkFence || !p) return;
+    const inside = this.confineWalkPoint(p.position.x, p.position.z);
+    if (!inside.clamped) return;
+    const previous = this.activeMode;
+    this.activeMode = 'person';
+    this.teleportActiveTo(p.position.x, p.position.z, p.heading);
+    this.activeMode = previous;
+    this.applyWalkFence(p.position);
   }
 
   getActiveEntity() {
@@ -334,6 +360,10 @@ class ThirdPersonControllerManager {
         const west = shore.westX + 8, east = shore.eastX - 8;
         if (west > east) return null;
         px = Math.max(west, Math.min(east, px));
+      }
+      if (this.activeMode === 'person') {
+        const fenced = this.confineWalkPoint(px, pz);
+        return { x: fenced.x, z: fenced.z };
       }
       return { x: px, z: pz };
     };
@@ -1012,14 +1042,7 @@ class ThirdPersonControllerManager {
     if (this.activeMode === 'person') {
       this.updatePerson(dt, elapsed);
     } else {
-      // Keep the sidewalk pedestrian walking naturally when not actively controlled
-      const p = this.entities.person;
-      const walkSpeed = 1.48;
-      p.speed = walkSpeed;
-      p.position.x += Math.sin(p.heading) * walkSpeed * dt;
-      p.position.z += Math.cos(p.heading) * walkSpeed * dt;
-      if (p.position.z < -340) p.heading = 0;
-      else if (p.position.z > 340) p.heading = Math.PI;
+      this.driftIdlePerson(dt);
     }
 
     if (this.activeMode === 'car') {
@@ -1055,6 +1078,26 @@ class ThirdPersonControllerManager {
     this.poseCharacters(dt);
   }
 
+  // Keep the sidewalk pedestrian walking naturally when not actively controlled
+  driftIdlePerson(dt) {
+    const p = this.entities.person;
+    const walkSpeed = 1.48;
+    p.speed = walkSpeed;
+    p.position.x += Math.sin(p.heading) * walkSpeed * dt;
+    p.position.z += Math.cos(p.heading) * walkSpeed * dt;
+    if (this.applyWalkFence(p.position)) p.heading += Math.PI;
+    if (p.position.z < -340) p.heading = 0;
+    else if (p.position.z > 340) p.heading = Math.PI;
+  }
+
+  applyWalkFence(pos) {
+    const fenced = this.confineWalkPoint(pos.x, pos.z);
+    if (!fenced.clamped) return false;
+    pos.x = fenced.x;
+    pos.z = fenced.z;
+    return true;
+  }
+
   updatePerson(dt) {
     const p = this.entities.person;
     const maxWalk = this.keys.boost ? 8.2 : 4.4;
@@ -1071,7 +1114,9 @@ class ThirdPersonControllerManager {
 
     p.position.x += Math.sin(p.heading) * p.speed * dt;
     p.position.z += Math.cos(p.heading) * p.speed * dt;
+    this.applyWalkFence(p.position);
     this.resolveHorizontalCollision(p.position, 0.48, p.position.y + 1.0);
+    this.applyWalkFence(p.position);
 
     const groundY = this.getGroundHeight(p.position.x, p.position.z, 'person');
     if (this.keys.up && p.position.y <= groundY + 0.02) {

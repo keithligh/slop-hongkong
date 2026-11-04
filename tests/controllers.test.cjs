@@ -5,6 +5,10 @@ const test = require('node:test');
 const { loadModule } = require('./helpers/module.cjs');
 
 const source = readFileSync(join(__dirname, '../js/controllers.js'), 'utf8');
+const walkConfine = loadModule(readFileSync(join(__dirname, '../js/walk-confine.js'), 'utf8'), {
+  globals: { URL },
+  imports: { './city-config.js': { HK_STREET_EYE: { x: -1.4, z: 29.3, heading: 1.29 }, HK_WALK_RADIUS: 50 } }
+});
 
 function eventTarget() {
   const listeners = new Map();
@@ -36,7 +40,8 @@ function keyboardHarness(nyc = {}) {
       './actor-models.js': {},
       './pedestrians.js': {},
       './vehicle-lights.js': {},
-      './landmarks.js': {}
+      './landmarks.js': {},
+      './walk-confine.js': walkConfine
     }
   });
   // Exercise the production event handlers without constructing the scene's 3D models.
@@ -375,4 +380,87 @@ test('player clearance respects altitude and permits a ground arrival under an a
   assert.equal(ent.position.y, 0.22);
   helicopter.position.y = 1;
   assert.notDeepEqual({ ...controller.teleportActiveTo(0, 0) }, { x: 0, z: 0 }, 'a helicopter parked at street level must be avoided');
+});
+
+const FENCE = walkConfine.createWalkFence();
+const insideFence = (p) => Math.hypot(p.x - FENCE.x, p.z - FENCE.z) <= 50;
+
+test('walk fence is a 50 m disc around the Digit1 eye and ?confine=off lifts it', () => {
+  assert.deepEqual({ ...FENCE }, { x: -1.4, z: 29.3, radius: 50 });
+  assert.deepEqual({ ...walkConfine.parseWalkConfineRequest('http://x/index.html') }, { enabled: true, debug: false });
+  assert.deepEqual({ ...walkConfine.parseWalkConfineRequest('http://x/index.html?confine=on') }, { enabled: true, debug: true });
+  assert.equal(walkConfine.parseWalkConfineRequest('http://x/index.html?confine=off').enabled, false);
+  assert.equal(walkConfine.parseWalkConfineRequest('http://x/index.html?confine=0').enabled, false);
+  const out = walkConfine.confineToWalkFence(FENCE, 400, -300);
+  assert.equal(out.clamped, true);
+  assert.ok(insideFence(out));
+  assert.equal(walkConfine.confineToWalkFence(FENCE, -1.4, 29.3).clamped, false);
+  assert.equal(walkConfine.confineToWalkFence(null, 400, -300).clamped, false);
+});
+
+test('person walking toward the fence is pushed back onto the circle and slides along it', () => {
+  const { controller, ent } = teleportHarness('person');
+  controller.setWalkFence(FENCE);
+  ent.position.x = FENCE.x + 49;
+  ent.position.z = FENCE.z;
+  ent.heading = Math.PI / 2;
+  ent.speed = 0;
+  controller.resolveHorizontalCollision = () => {};
+  controller.keys.forward = 1;
+  for (let i = 0; i < 600; i++) {
+    controller.updatePerson(1 / 60);
+    assert.ok(insideFence(ent.position), `step ${i} stays inside the disc`);
+  }
+  assert.ok(Math.hypot(ent.position.x - FENCE.x, ent.position.z - FENCE.z) > 49, 'the walker rests at the fence, not the middle');
+});
+
+test('person teleport outside the fence snaps inside, car teleport is untouched', () => {
+  const person = teleportHarness('person');
+  person.controller.setWalkFence(FENCE);
+  const dest = person.controller.teleportActiveTo(400, 400, 1);
+  assert.ok(insideFence(dest), 'a far ?at= lands inside the disc');
+  assert.ok(insideFence(person.ent.position));
+  const inside = person.controller.teleportActiveTo(-1.4, 29.3, 1.29);
+  assert.deepEqual({ ...inside }, { x: -1.4, z: 29.3 }, 'the eye itself is kept exactly');
+
+  const car = teleportHarness('car');
+  car.controller.setWalkFence(FENCE);
+  assert.deepEqual({ ...car.controller.teleportActiveTo(400, 400, 1) }, { x: 400, z: 400 });
+});
+
+test('Digit1 mode switch brings a drifted person back inside the fence and ?confine=off does not', () => {
+  const { controller, ent } = teleportHarness('car');
+  const person = teleportHarness('person').ent;
+  person.position.x = 300;
+  person.position.z = -200;
+  controller.entities.person = person;
+  controller.entities.car = ent;
+  controller.setWalkFence(FENCE);
+  assert.ok(insideFence(person.position), 'installing the fence already recovers an outside person');
+  person.position.x = 300;
+  person.position.z = -200;
+  controller.setMode('person');
+  assert.ok(insideFence(person.position));
+  assert.equal(controller.activeMode, 'person');
+
+  person.position.x = 300;
+  controller.setWalkFence(null);
+  controller.setMode('car');
+  controller.setMode('person');
+  assert.equal(person.position.x, 300, 'confine off leaves the person where it is');
+});
+
+test('idle pedestrian turns back at the fence while another mode is driven', () => {
+  const { controller, ent } = teleportHarness('car');
+  const person = teleportHarness('person').ent;
+  person.position.x = FENCE.x + 49.9;
+  person.position.z = FENCE.z;
+  person.heading = Math.PI / 2;
+  controller.entities.person = person;
+  controller.entities.car = ent;
+  controller.setWalkFence(FENCE);
+  for (let i = 0; i < 300; i++) {
+    controller.driftIdlePerson(1 / 60);
+    assert.ok(insideFence(person.position));
+  }
 });
