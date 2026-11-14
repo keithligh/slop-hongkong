@@ -1288,6 +1288,85 @@ export const HK_DIGIT1_MIDBAND_GRID_ELIMINATED = Object.freeze([
   Object.freeze({ sheet: '11-SW-8C', minM: 839 })
 ]);
 
+// Real individualised meshes beside the two mid-band plates. The plates themselves
+// are not buildings: the right one is the Chater Garden bus stop on Des Voeux
+// (22.28018 N, 114.16062 E) and the left one is Queensway (22.28048 N, 114.16120 E).
+// LandsD building polygons return nothing on either plate. These boxes are the
+// glTF bounds, and they match the LandsD footprints within about 5 m.
+// 11-SW-8D (781 BUILDING glTF) has nothing within 40 m of either plate.
+export const HK_DIGIT1_REAL_FRONTAGES = Object.freeze([
+  Object.freeze({
+    id: 'B345471572201063A0',
+    name: 'Bank of China Building',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-right',
+    minX: 12.9,
+    maxX: 55.4,
+    minZ: 49.8,
+    maxZ: 95.7,
+    span: 46
+  }),
+  Object.freeze({
+    id: 'B345831563001063A0',
+    name: 'Cheung Kong Center',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-right',
+    minX: 43.1,
+    maxX: 109.6,
+    minZ: 114.8,
+    maxZ: 181,
+    span: 66.5
+  }),
+  Object.freeze({
+    id: 'B345831577701063A0',
+    name: 'The Court of Final Appeal',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-left',
+    minX: 29.4,
+    maxX: 86.2,
+    minZ: -43,
+    maxZ: 35.4,
+    span: 78.5
+  }),
+  Object.freeze({
+    id: 'B347491569901063A0',
+    name: 'The Henderson',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-left',
+    minX: 217.5,
+    maxX: 263.6,
+    minZ: 53.7,
+    maxZ: 105,
+    span: 51.2
+  }),
+  Object.freeze({
+    id: 'B348641561601063A0',
+    name: 'Lippo Centre',
+    sheet: '11-SW-9C',
+    beside: 'east',
+    minX: 341.1,
+    maxX: 383.7,
+    minZ: 135.4,
+    maxZ: 178.3,
+    span: 42.9
+  }),
+  Object.freeze({
+    id: 'B344751569101063A0',
+    name: 'HSBC Main Building',
+    sheet: '11-SW-8D',
+    beside: 'eye',
+    minX: -66.9,
+    maxX: 13.4,
+    minZ: 29.2,
+    maxZ: 102.1,
+    span: 80.3
+  })
+]);
+
+export function digit1FrontageIds(frontages = HK_DIGIT1_REAL_FRONTAGES) {
+  return new Set((frontages || []).map((entry) => entry.id));
+}
+
 // Closest non-BUILDING feature that is not a sheet-wide tile. Not a photograph to pin.
 export const HK_DIGIT1_MIDBAND_NOT_BUILDING = Object.freeze({
   sheet: '11-SW-9C',
@@ -1348,10 +1427,13 @@ export function planGltfManifest(manifest, {
     masses.push({ ...entry, dist: boxClosestDistance(entry, eye) });
   }
   const pinBoxes = pins || bankOfChinaPins();
+  const frontageIds = digit1FrontageIds();
   const pinned = [];
+  const frontages = [];
   const rest = [];
   for (const entry of masses) {
     if (pinBoxes.some((pin) => footprintOverlapRatio(pin, entry, 2) >= 0.15)) pinned.push(entry);
+    else if (frontageIds.has(entry.name)) frontages.push(entry);
     else rest.push(entry);
   }
   // Street faces first. A nearer Sheung Wan block behind the camera must not
@@ -1362,8 +1444,9 @@ export function planGltfManifest(manifest, {
     return pa - pb || a.dist - b.dist || (b.span - a.span);
   };
   pinned.sort(byChase);
+  frontages.sort(byChase);
   rest.sort(byChase);
-  const selected = pinned.concat(rest).slice(0, cap).map(({ dist, ...entry }) => entry);
+  const selected = pinned.concat(frontages, rest).slice(0, cap).map(({ dist, ...entry }) => entry);
   return {
     sheet: manifest?.sheet || '',
     reason: manifest?.reason || '',

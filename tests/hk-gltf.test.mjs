@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, HK_STREET_NEAR, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import { digit1FarFrameFidelity, keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
+import { DIGIT1_MIDBAND_PLATES, digit1MidbandWallSpec, worldToHk80 } from '../js/hk-pland-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -68,6 +69,8 @@ import {
   hk80GridToHk80Geog,
   hk80GridToWgs84,
   hk80ToWorld,
+  HK_DIGIT1_REAL_FRONTAGES,
+  digit1FrontageIds,
   hkpdToSidewalkY,
   isBuildingGltf,
   planGltfManifest,
@@ -901,6 +904,48 @@ test('a facade sliver grows into its photograph, and a real chart is not a slive
   assert.ok(uvs[1][0] - uvs[0][0] > 0.2);
   assert.ok(uvs[2][1] - uvs[0][1] > 0.3);
   assert.equal(growLandsdPhotoRect(0, 0, w, h, gutter), null);
+});
+
+test('the mid-band plates are open ground; the photo frontages stay in the cap', () => {
+  const right = digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[0]).position;
+  const left = digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[1]).position;
+  const rightGrid = worldToHk80(right.x, right.z);
+  const leftGrid = worldToHk80(left.x, left.z);
+  // East of the 8D/9C sheet edge at easting 834500.6, so 8D is the wrong sheet.
+  assert.ok(rightGrid.easting > 834520 && rightGrid.easting < 834680);
+  assert.ok(leftGrid.easting > 834520 && leftGrid.easting < 834720);
+  const boc = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'Bank of China Building');
+  const cfa = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'The Court of Final Appeal');
+  const ckc = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'Cheung Kong Center');
+  assert.equal(hkGltfBoxContains(boc, right.x, right.z), false);
+  assert.equal(hkGltfBoxContains(cfa, left.x, left.z), false);
+  assert.equal(hkGltfBoxContains(ckc, right.x, right.z), false);
+  const rightGap = boxClosestDistance(boc, right);
+  const leftGap = boxClosestDistance(cfa, left);
+  const towerGap = boxClosestDistance(ckc, right);
+  assert.ok(rightGap > 25 && rightGap < 40, `BoC gap ${rightGap}`);
+  assert.ok(leftGap > 50 && leftGap < 70, `CFA gap ${leftGap}`);
+  assert.ok(towerGap > 30 && towerGap < 50, `CKC gap ${towerGap}`);
+  const decoys = Array.from({ length: 250 }, (_, index) => ({
+    name: `off-${index}`,
+    file: `off-${index}.gltf`,
+    minX: -500 - index,
+    maxX: -480 - index,
+    minZ: 0,
+    maxZ: 20,
+    minH: 0,
+    maxH: 40,
+    span: 20
+  }));
+  const walls = HK_DIGIT1_REAL_FRONTAGES.map((entry) => ({
+    ...entry,
+    name: entry.id,
+    file: `${entry.id}.gltf`
+  }));
+  const plan = planGltfManifest({ buildings: [...decoys, ...walls] }, { cap: 30, pins: [] });
+  const kept = new Set(plan.selected.map((entry) => entry.name));
+  for (const id of digit1FrontageIds()) assert.equal(kept.has(id), true, id);
+  assert.ok(plan.selected.length <= 30);
 });
 
 test('street-level up-faces are the deck, and walls and roofs stay photographs', () => {

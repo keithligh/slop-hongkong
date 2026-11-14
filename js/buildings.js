@@ -290,12 +290,14 @@ function buildCityBlocks(scene, gltfPlan = null) {
   return buildHkFootprintBlocks(scene, gltfPlan);
 }
 
-// The Digit1 mid-band plates are empty. A bounds pass of every 11-SW-9C
-// BUILDING glTF leaves both boxes more than 8 m from every mesh, and no
-// footprint block sits on them. The enamel boxes (hkMidbandCanyon) were the
-// yellow/pink/green bands and the blue/white towers in the chase, in front of
-// Bank of China Building, the Court of Final Appeal, The Henderson, and Lippo.
-// They are not mounted. PlanD still omits those plates when a donor is on.
+// Invented filler, not a missing building. The right plate is the Chater Garden
+// bus stop on Des Voeux; the left plate is Queensway. LandsD building polygons
+// miss both envelopes, 11-SW-9C (73) and 11-SW-8D (781) meshes miss them, and
+// the glTF placement of the real neighbours matches those footprints within
+// about 5 m. The photograph is those meshes (Bank of China Building, Cheung
+// Kong Center, the Court of Final Appeal, The Henderson, Lippo, HSBC), which
+// the cap keeps. An enamel box on the road is not a facade. PlanD still omits
+// the plates when a donor is on.
 function addDigit1MidbandWalls() {
   return 0;
 }
