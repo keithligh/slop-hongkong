@@ -164,6 +164,8 @@ async function initApp() {
   }
   markInit('groundTiles');
   // Default Digit1 ground is the game deck. The probe reads which mesh a down-ray meets.
+  // ?debug=scene exposes the scene to tools/digit1-disc-shots.mjs (hide a named mesh, re-shoot).
+  if (new URL(window.location.href).searchParams.get('debug') === 'scene') window.__hkScene = scene;
   const gameGround = probeDigit1GameGround([cityGrid.group, groundMount.group]);
   window.__digit1GameGround = gameGround;
   console.info(`[game-ground] eye ${gameGround.owner} tiles ${gameGround.tiles} mounted ${gameGround.tilesMounted} ${gameGround.rows.map((row) => `${row.label}:${row.name || '-'}`).join(' ')}`);
@@ -206,8 +208,9 @@ async function initApp() {
     const walkFence = createWalkFence();
     controllerManager.setWalkFence(walkFence);
     if (walkConfine.debug) {
-      const ring = new THREE.LineLoop(
-        new THREE.BufferGeometry().setFromPoints(Array.from({ length: 128 }, (_, i) => {
+      // WebGPURenderer rejects LineLoop, so the loop is closed by repeating the first point.
+      const ring = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(Array.from({ length: 129 }, (_, i) => {
           const a = (i / 128) * Math.PI * 2;
           return new THREE.Vector3(walkFence.x + Math.cos(a) * walkFence.radius, 0.3, walkFence.z + Math.sin(a) * walkFence.radius);
         })),

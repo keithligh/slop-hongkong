@@ -15,6 +15,7 @@ import {
 import {
   createCurbMaterial,
   createCurtainWallMaterial,
+  createCoastLandMaterial,
   createLaneStripeMaterial,
   createRetailPodiumMaterial,
   createRoadSurfaceMaterial,
@@ -22,6 +23,7 @@ import {
   createWaterMaterial
 } from './tsl-materials.js';
 import { GEO } from './geo-source.js';
+import { digit1PlazaDisc } from './hk-game-ground-frame.js';
 import { HK_CANYON_HEIGHT, canyonGlassWalls, clipCanyonWalls, hkCanyonBuildings, planHkStreetCanyon } from './hk-ground-fill.js';
 import { omitPlandCorridorGlass } from './hk-pland-frame.js';
 import { HK_PEDESTRIAN } from './hk-pedestrian-data.js';
@@ -430,13 +432,7 @@ function buildHkCityGrid(scene, gltfPlan = null) {
   waterMesh.position.set((play.minX + play.maxX) * 0.5, play.waterLevel, (play.minZ + play.maxZ) * 0.5);
   group.add(waterMesh);
 
-  const landMat = new THREE.MeshStandardNodeMaterial({
-    color: 0x6a7264,
-    roughness: 0.94,
-    metalness: 0,
-    side: THREE.DoubleSide
-  });
-  landMat.name = 'hkCoastLand';
+  const landMat = createCoastLandMaterial(digit1PlazaDisc());
   landMat.polygonOffset = true;
   landMat.polygonOffsetFactor = 1;
   landMat.polygonOffsetUnits = 1;
