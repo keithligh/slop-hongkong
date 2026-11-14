@@ -12,10 +12,8 @@ import {
   hkRetailSlices,
   hkScaleRing
 } from './city-config.js';
-import { DIGIT1_MIDBAND_PLATES, digit1MidbandWallSpec } from './hk-pland-frame.js';
 import {
   createCurtainWallMaterial,
-  createMidbandCanyonMaterial,
   createPodiumMasonryMaterial,
   createRetailPodiumMaterial
 } from './tsl-materials.js';
@@ -292,29 +290,14 @@ function buildCityBlocks(scene, gltfPlan = null) {
   return buildHkFootprintBlocks(scene, gltfPlan);
 }
 
-// Honest face for the Digit1 mid-band plates. Cut #36 bounds-tested BUILDING
-// glTF on 11-SW-9C, 11-SW-8D, 11-SW-14A and 11-SW-13B. None contains the eye
-// hits (closest 25.5 m, Bank of China Building on 9C). A blank omit would open
-// onto distant curtain. The wall stays: shopfront belt, window grid above.
-// Compare keeps the 2017 mesh and does not draw this stand-in.
-// Kept off the footprint-extrude path: that path must not grow a box stand-in.
-function addDigit1MidbandWalls(group, gltfPlan) {
-  if (gltfPlan?.plandMode === 'compare') return 0;
-  const material = createMidbandCanyonMaterial();
-  for (const plate of DIGIT1_MIDBAND_PLATES) {
-    const spec = digit1MidbandWallSpec(plate);
-    const geo = new THREE.BoxGeometry(spec.size.along, spec.size.height, spec.size.side);
-    const mesh = new THREE.Mesh(geo, material);
-    mesh.name = 'HkMidbandCanyon';
-    mesh.userData.hkSource = 'footprint';
-    mesh.userData.hkPlate = spec.id;
-    mesh.position.set(spec.position.x, spec.position.y, spec.position.z);
-    mesh.rotation.y = spec.rotationY;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  }
-  return DIGIT1_MIDBAND_PLATES.length;
+// The Digit1 mid-band plates are empty. A bounds pass of every 11-SW-9C
+// BUILDING glTF leaves both boxes more than 8 m from every mesh, and no
+// footprint block sits on them. The enamel boxes (hkMidbandCanyon) were the
+// yellow/pink/green bands and the blue/white towers in the chase, in front of
+// Bank of China Building, the Court of Final Appeal, The Henderson, and Lippo.
+// They are not mounted. PlanD still omits those plates when a donor is on.
+function addDigit1MidbandWalls() {
+  return 0;
 }
 
 export { buildCityBlocks };

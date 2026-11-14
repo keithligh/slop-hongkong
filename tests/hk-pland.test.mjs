@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { BLOCKS, HK_RETAIL_BELT, HK_STREET_EYE, HK_STREET_NEAR, ISLAND_BOUNDS } from '../js/city-config.js';
 import { HK_CURB_W, HK_WALK_W } from '../js/hk-road-deck.js';
 import { boxClosestDistance, hk80ToWorld } from '../js/hk-gltf-frame.js';
+import { digit1ChasePose, projectChaseNdc } from '../js/digit1-probe-frame.js';
 import {
   PLAND_ATTRIBUTION,
   PLAND_DATASET,
@@ -686,9 +687,27 @@ test('PlanD yields the Digit1 mid-band chartless plates and keeps the holds', ()
   assert.match(page, /omitted \$\{midband\} triangles on the Digit1 mid-band chartless plate/);
   assert.match(page, /boxes\?\.length && plandOmitsDigit1MidbandPlate/);
   const buildings = readFileSync(path.join(root, 'js/buildings.js'), 'utf8');
-  assert.match(buildings, /HkMidbandCanyon/);
-  assert.match(buildings, /plandMode === 'compare'/);
+  assert.match(buildings, /function addDigit1MidbandWalls/);
+  assert.doesNotMatch(buildings, /mesh\.name = 'HkMidbandCanyon'/);
+  assert.doesNotMatch(buildings, /new THREE\.BoxGeometry/);
   assert.doesNotMatch(buildings, /hkShopfrontAlbedo|hkCorridorPodiumFill/);
+});
+
+test('the 49.5 m colour bands are the mid-band plates, and the page does not build them', () => {
+  const pose = digit1ChasePose({ x: 46.673, y: 0, z: 41.099, heading: 1.29 });
+  const right = projectChaseNdc(pose, digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[0]).position, 16 / 9);
+  const left = projectChaseNdc(pose, digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[1]).position, 16 / 9);
+  assert.ok(right.ndcX > 0.25 && right.ndcX < 0.7, `right plate ndc ${right.ndcX}`);
+  assert.ok(right.depth > 40 && right.depth < 80, `right plate depth ${right.depth}`);
+  assert.ok(left.ndcX < -0.05 && left.ndcX > -0.5, `left plate ndc ${left.ndcX}`);
+  assert.ok(left.depth > 80 && left.depth < 140, `left plate depth ${left.depth}`);
+  const eye = digit1ChasePose({ x: -1.4, y: 0, z: 29.3, heading: 1.29 });
+  const distant = projectChaseNdc(eye, digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[0]).position, 16 / 9);
+  assert.ok(distant.depth > 70 && Math.abs(distant.ndcX) < 1, `spawn plate ndc ${distant.ndcX} depth ${distant.depth}`);
+  const buildings = readFileSync(path.join(root, 'js/buildings.js'), 'utf8');
+  const fn = buildings.slice(buildings.indexOf('function addDigit1MidbandWalls'));
+  assert.match(fn, /return 0;/);
+  assert.doesNotMatch(fn, /new THREE\.(Mesh|BoxGeometry)/);
 });
 
 test('corridor glass and the Digit1 shopfront ribbon stay omitted on the default eye', () => {
