@@ -58,6 +58,11 @@ import {
   landsdNullFillTriangles,
   landsdSealFarNullTriangles,
   remapLandsdChartUv,
+  growLandsdPhotoRect,
+  landsdPhotoChartUvs,
+  landsdStreetDeck,
+  landsdUvSliver,
+  LANDSD_STREET_DECK_RISE,
   NULL_FILL_EDGE,
   nullFillSampleSize,
   hk80GridToHk80Geog,
@@ -863,4 +868,53 @@ test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
   const nineC = HK_DIGIT1_MIDBAND_HUNT[0];
   assert.equal(nineC.closestId, 'B345471572201063A0');
   assert.equal(nineC.closestM, 25.5);
+});
+
+test('a facade sliver grows into its photograph, and a real chart is not a sliver', () => {
+  // HSBC wall triangles sit near 0.21 by 0.002. The Bank of China window face is 0.24 by 0.12.
+  assert.equal(landsdUvSliver(0, 0, 0.21, 0.002), true);
+  assert.equal(landsdUvSliver(0.004, 0.258, 0.246, 0.376), false);
+  assert.equal(landsdUvSliver(-22, 0, 21, 1), false);
+  const w = 12;
+  const h = 10;
+  const data = new Uint8Array(w * h * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 60;
+    data[i + 1] = 60;
+    data[i + 2] = 60;
+    data[i + 3] = 255;
+  }
+  for (let y = 3; y < 8; y++) {
+    for (let x = 2; x < 6; x++) {
+      const i = (y * w + x) * 4;
+      data[i] = 180;
+      data[i + 1] = 160;
+      data[i + 2] = 140;
+    }
+  }
+  const gutter = (x, y) => isLandsdAtlasGutter(data[(y * w + x) * 4], data[(y * w + x) * 4 + 1], data[(y * w + x) * 4 + 2]);
+  const rect = growLandsdPhotoRect(3, 4, w, h, gutter);
+  assert.deepEqual(rect, { x0: 2, y0: 3, x1: 6, y1: 8 });
+  assert.equal(gutter(rect.x0, rect.y0), false);
+  assert.equal(gutter(1, 4), true);
+  const uvs = landsdPhotoChartUvs(rect, w, h);
+  assert.ok(uvs[1][0] - uvs[0][0] > 0.2);
+  assert.ok(uvs[2][1] - uvs[0][1] > 0.3);
+  assert.equal(growLandsdPhotoRect(0, 0, w, h, gutter), null);
+});
+
+test('street-level up-faces are the deck, and walls and roofs stay photographs', () => {
+  const sidewalk = 0.22;
+  assert.equal(landsdStreetDeck(0.9, 0.5, sidewalk), true);
+  assert.equal(landsdStreetDeck(0.2, 0.5, sidewalk), false);
+  assert.equal(landsdStreetDeck(0.95, sidewalk + LANDSD_STREET_DECK_RISE + 0.05, sidewalk), false);
+  assert.equal(landsdStreetDeck(0.8, sidewalk + 3.5, sidewalk), true);
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /repairSliverCharts\(geo, obj\.material\)/);
+  assert.match(page, /detachStreetDeck\(geo\)/);
+  assert.match(page, /name = 'hkStreetDeck'/);
+  assert.match(page, /boxClosestDistance\(entry, HK_STREET_EYE\) <= HK_STREET_NEAR/);
+  assert.match(page, /ON_EYE_PRIVATE_CAP/);
+  assert.match(page, /splitLandsdOnEyeCharts\(geo, obj\.material, sampler\)/);
+  assert.doesNotMatch(page, /new Uint8ClampedArray\(LANDSD_ON_EYE_ATLAS \* LANDSD_ON_EYE_ATLAS/);
 });

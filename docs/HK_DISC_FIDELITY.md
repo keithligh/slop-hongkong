@@ -30,9 +30,16 @@ With the sheets present the procedural walls are already gone from the disc. The
 - `js/main.js`: the confine debug ring is a closed `THREE.Line`. `?debug=scene` exposes `window.__hkScene` for the review tools.
 - `tools/digit1-disc-shots.mjs`: one boot, several camera orbits, optional mesh hides, `--eval`. `tools/digit1-disc-inventory.mjs`: the table above.
 
+## Texture fidelity inside the fence
+
+The mounted sheets are real facade photographs. Two faults were in how those photographs were addressed.
+
+- **Striped facades.** A wall triangle on these sheets often has a UV box a few pixels tall and a large fraction of the atlas wide. On HSBC (`B344751569101063A0`) that is thousands of triangles at about 0.002 by 0.2. The slice crosses unrelated charts, so a podium reads as colour bands. `repairSliverCharts` grows the photograph around a corner that is not gutter and aims the triangle at that chart. A real chart is left alone: the Bank of China window face is about 0.12 on the short side, and repeating railing UVs (outside 0–1) stay repeating. The three on-eye full-bleed faces no longer share one 4096 shelf. Each large face is its own clamp texture, so anisotropy stops on the photograph.
+- **Scrambled pavement.** The same HSBC mesh has about 21 000 up-facing triangles within a few metres of the sidewalk. Each one addresses a different scrap (UV span about 0.007). They sit on the walks and the plaza; the Des Voeux carriageway beside the eye is not one of them. Inside the 80 m disc those triangles leave the photograph and use `hkStreetDeck`, the same world-metre flags as the sidewalk. The carriageway stays the game deck. Roofs and walls stay photographs. The Bank of China Tower is outside that disc, so its base is unchanged.
+
 ## Deferred
 
-- **LandsD photographs near the eye.** The photogrammetry is the data: the HSBC podium and glass are low-poly planes and blank panels. No chart reassignment fixes that. Better meshes need a better source.
+- **LandsD photographs near the eye.** A chart that is only a few texels of stone is still that photograph, now shown whole instead of as a slice across the atlas. It is not a new survey.
 - **The mid-field procedural boxes** past 80 m (white and light-blue banded towers, black glass with an enamel belt) are outside the fence and out of scope.
 - **Shaded ground still reads cool.** The golden-hour ambient is blue; paving in shadow is blue-grey. That is the lighting rig, not a material.
 - **Street life.** 0 benches and 0 lamps are mapped inside 80 m. OSM has none there; none were invented.
@@ -43,6 +50,6 @@ With the sheets present the procedural walls are already gone from the disc. The
 
 1. `node tools/fetch-central-gltf-sheet.mjs --street` (11-SW-9C and 11-SW-8D are enough for the disc).
 2. Serve the repo and open `index.html?at=-1.4,29.3,1.29&confine=on`.
-3. Walk to the fence; the ring is a thin red line. Look at the ground between the OSM pavement and the walls (it is paved, not teal) and at the plaza under HSBC.
+3. Walk to the fence; the ring is a thin red line. Nearby walls should be facade photographs, not horizontal colour bands. The walks and the plaza should be continuous flags, not a patchwork of atlas scraps. The carriageway stays the asphalt deck. The Bank of China Tower, past the fence, stays its own mesh.
 4. Without `hk-3d/` (or `?gltf=11-SW-9A`) the fallback walls should show crisp openings and a stone band, not a smear and orange.
 5. Headless review on a CPU-only box: `node tools/digit1-disc-shots.mjs artifacts/disc --query 'at=-1.4,29.3,1.29&confine=on&gltfCap=10&debug=scene' --hide-hud --shots 'east:0:0,south:-720:0'`. `gltfCap=10` keeps the 7 gate meshes and stays inside what SwiftShader can hold; the default cap of 200 loses the device there. That run is not Keith's MSI and does not claim a Soft pass.

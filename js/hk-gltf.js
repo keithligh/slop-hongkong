@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, ISLAND_BOUNDS } from './city-config.js';
+import { BLOCKS, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, HK_STREET_NEAR, ISLAND_BOUNDS } from './city-config.js';
 import {
   DIGIT1_FAR_CHASE,
   HK_GLTF_MOUNT_WIDE,
@@ -16,27 +16,31 @@ import {
   hiddenExtrudeIds,
   hk80ToWorld,
   isGltfPinSheet,
+  isLandsdAtlasGutter,
   landsdAlbedoRow,
   groupLandsdOnEyeCharts,
   isLandsdOnEyeChart,
   LANDSD_ON_EYE_ATLAS,
-  LANDSD_ON_EYE_PAD,
   landsdChartPixels,
   landsdChartRect,
   landsdChartWrap,
   landsdDilateGutter,
-  packLandsdChartBins,
   landsdFarGrainMaxLod,
   presentLandsdFarChartUnlit,
   landsdGutterFraction,
   landsdGutterMip,
   landsdLimitMipChain,
   landsdNullFillTriangles,
+  landsdPhotoChartUvs,
+  landsdStreetDeck,
+  landsdUvSliver,
+  growLandsdPhotoRect,
   nullFillSampleSize,
   planGltfManifest,
   remapLandsdChartUv,
   resolveHkGltfRequest
 } from './hk-gltf-frame.js';
+import { createSidewalkMaterial } from './tsl-materials.js';
 import { filterDigit1ProbeBuildings, parseDigit1ProbeRequest } from './digit1-probe-frame.js';
 
 // LandsD individualised sheets for Central street faces. A missing manifest leaves the extrudes.
@@ -407,10 +411,9 @@ function geometryForTriangles(geo, index, triangleIds) {
   return part;
 }
 
-function remapChartUv(geo, index, triangleIds, sw, sh, pixels, slot) {
+function remapChartUv(geo, index, triangleIds, sw, sh, pixels, slot, atlasW = LANDSD_ON_EYE_ATLAS, atlasH = atlasW) {
   const uv = geo.getAttribute('uv');
   const seen = new Set();
-  const atlas = LANDSD_ON_EYE_ATLAS;
   for (const id of triangleIds) {
     const base = id * 3;
     for (let k = 0; k < 3; k++) {
@@ -420,8 +423,8 @@ function remapChartUv(geo, index, triangleIds, sw, sh, pixels, slot) {
       if (vertex < 0 || vertex >= uv.count) continue;
       const u = uv.getX(vertex);
       const v = uv.getY(vertex);
-      let nu = (slot.contentX + (u * sw - pixels.x0)) / atlas;
-      let nv = (slot.contentY + (v * sh - pixels.y0)) / atlas;
+      let nu = (slot.contentX + (u * sw - pixels.x0)) / atlasW;
+      let nv = (slot.contentY + (v * sh - pixels.y0)) / atlasH;
       if (nu < 0) nu = 0;
       else if (nu > 1) nu = 1;
       if (nv < 0) nv = 0;
@@ -441,11 +444,164 @@ function atlasTexture(sourceTex, canvas, sampler) {
   return tex;
 }
 
+// One sidewalk material for every street-level LandsD triangle. World metres,
+// same flags as the deck, so adjacent scraps stop being different atlas tiles.
+let streetDeckMat = null;
+function streetDeckMaterial() {
+  if (streetDeckMat) return streetDeckMat;
+  streetDeckMat = createSidewalkMaterial({ ribbon: false });
+  streetDeckMat.name = 'hkStreetDeck';
+  streetDeckMat.polygonOffset = true;
+  streetDeckMat.polygonOffsetFactor = -1;
+  streetDeckMat.polygonOffsetUnits = -1;
+  return streetDeckMat;
+}
+
+function sheetGutter(sheet) {
+  return (x, y) => {
+    const i = (y * sheet.w + x) * 4;
+    return isLandsdAtlasGutter(sheet.data[i], sheet.data[i + 1], sheet.data[i + 2]);
+  };
+}
+
+function sliverBounds(uv, a, b, c) {
+  const u0 = uv.getX(a);
+  const v0 = uv.getY(a);
+  const u1 = uv.getX(b);
+  const v1 = uv.getY(b);
+  const u2 = uv.getX(c);
+  const v2 = uv.getY(c);
+  return {
+    minU: Math.min(u0, u1, u2),
+    minV: Math.min(v0, v1, v2),
+    maxU: Math.max(u0, u1, u2),
+    maxV: Math.max(v0, v1, v2),
+    seeds: [
+      [u0, v0],
+      [u1, v1],
+      [u2, v2]
+    ]
+  };
+}
+
+// Copy the three corners onto fresh vertices so a shared UV is not rewritten
+// for a neighbour that already samples a real chart.
+function rewriteTriangleUvs(geo, index, triangleStarts, uvsFor) {
+  const names = Object.keys(geo.attributes);
+  const base = geo.getAttribute('position').count;
+  const extra = triangleStarts.length * 3;
+  for (const name of names) {
+    const attr = geo.getAttribute(name);
+    const item = attr.itemSize;
+    const dst = new Float32Array((base + extra) * item);
+    for (let i = 0; i < base; i++) {
+      for (let k = 0; k < item; k++) dst[i * item + k] = attributeComponent(attr, i, k);
+    }
+    geo.setAttribute(name, new THREE.BufferAttribute(dst, item, attr.normalized));
+  }
+  const uv = geo.getAttribute('uv');
+  // A Uint16 index would wrap once the duplicated corners pass 65535.
+  const src = Uint32Array.from(index);
+  let cursor = base;
+  for (let n = 0; n < triangleStarts.length; n++) {
+    const t = triangleStarts[n];
+    const uvs = uvsFor(n);
+    for (let k = 0; k < 3; k++) {
+      const from = src[t + k];
+      for (const name of names) {
+        const attr = geo.getAttribute(name);
+        const item = attr.itemSize;
+        const arr = attr.array;
+        const dst = cursor * item;
+        const origin = from * item;
+        for (let c = 0; c < item; c++) arr[dst + c] = arr[origin + c];
+      }
+      uv.setXY(cursor, uvs[k][0], uvs[k][1]);
+      src[t + k] = cursor;
+      cursor += 1;
+    }
+  }
+  geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(src), 1));
+  geo.clearGroups();
+  uv.needsUpdate = true;
+}
+
+// A sliver samples a strip of the atlas. Grow the photograph around a corner
+// that is not gutter and aim the triangle at that chart.
+export function repairSliverCharts(geo, material) {
+  const map = albedoMap(material);
+  const uv = geo.getAttribute('uv');
+  if (!map || !uv) return 0;
+  const sheet = nullFillSheet(map);
+  if (!sheet) return 0;
+  const gutter = sheetGutter(sheet);
+  const src = triangleIndex(geo);
+  const starts = [];
+  const charts = [];
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const bounds = sliverBounds(uv, src[t], src[t + 1], src[t + 2]);
+    if (!landsdUvSliver(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV)) continue;
+    let grown = null;
+    for (const [u, v] of bounds.seeds) {
+      let uu = u % 1;
+      if (uu < 0) uu += 1;
+      const x = Math.min(sheet.w - 1, (uu * sheet.w) | 0);
+      const y = landsdAlbedoRow(v, sheet.h);
+      grown = growLandsdPhotoRect(x, y, sheet.w, sheet.h, gutter);
+      if (grown) break;
+    }
+    const chart = grown ? landsdPhotoChartUvs(grown, sheet.w, sheet.h) : null;
+    if (!chart) continue;
+    starts.push(t);
+    charts.push(chart);
+  }
+  if (!starts.length) return 0;
+  rewriteTriangleUvs(geo, src, starts, (n) => charts[n]);
+  return starts.length;
+}
+
+// Street-level up-faces leave the photograph. The deck material is continuous
+// in world metres. Only meshes inside the 80 m overlay disc: the Bank of China
+// Tower base stays the scenery mesh.
+export function detachStreetDeck(geo, sidewalkY = ISLAND_BOUNDS.sidewalkHeight) {
+  const pos = geo.getAttribute('position');
+  const nrm = geo.getAttribute('normal');
+  if (!pos || !nrm) return null;
+  const src = triangleIndex(geo);
+  const keep = [];
+  const deck = [];
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ny = (attributeComponent(nrm, a, 1) + attributeComponent(nrm, b, 1) + attributeComponent(nrm, c, 1)) / 3;
+    const y = (attributeComponent(pos, a, 1) + attributeComponent(pos, b, 1) + attributeComponent(pos, c, 1)) / 3;
+    if (landsdStreetDeck(ny, y, sidewalkY)) deck.push(a, b, c);
+    else keep.push(a, b, c);
+  }
+  if (!deck.length) return null;
+  const deckGeo = geo.clone();
+  deckGeo.setIndex(new THREE.BufferAttribute(Uint32Array.from(deck), 1));
+  deckGeo.clearGroups();
+  if (!keep.length) geo.setDrawRange(0, 0);
+  else {
+    geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(keep), 1));
+    geo.clearGroups();
+    geo.setDrawRange(0, Infinity);
+  }
+  return deckGeo;
+}
+
+// How many on-eye faces get a private clamp texture. The rest stay on the
+// file. A shared 4096 shelf lets anisotropy walk out of a chart into the
+// next one; that is the saturated band on a grazing podium.
+const ON_EYE_PRIVATE_CAP = 24;
+
 // Full-bleed on-eye atlases (tower _002/_003, flank _001) address one face
 // per triangle. The primitive bounds cover the file, so the sub-rectangle
-// crop never runs, and the anisotropic kernel steps across the one-pixel
-// gutter into the next chart. Each face is copied with a replicated edge
-// and sampled from its own clamp border. Other materials keep packLandsdChart.
+// crop never runs. Each large face is copied into its own clamp texture so
+// the anisotropic kernel stops on that photograph. Other materials keep
+// packLandsdChart.
 export function splitLandsdOnEyeCharts(geo, material, sampler) {
   if (!sampler?.chartMips || !geo || Array.isArray(material)) return null;
   if (!isLandsdOnEyeChart(material?.name)) return null;
@@ -469,44 +625,43 @@ export function splitLandsdOnEyeCharts(geo, material, sampler) {
     const px = landsdChartPixels(group.rect, sw, sh);
     return { group, px };
   });
-  const slots = packLandsdChartBins(charts.map((chart) => ({
-    width: chart.px.width,
-    height: chart.px.height
-  })), LANDSD_ON_EYE_ATLAS, LANDSD_ON_EYE_PAD);
-  const byAtlas = new Map();
+  const ranked = charts
+    .map((chart, i) => ({
+      chart,
+      i,
+      area: chart.px ? chart.px.width * chart.px.height : 0
+    }))
+    .sort((a, b) => b.area - a.area || a.i - b.i);
   const restIds = grouped.rest.slice();
-  charts.forEach((chart, i) => {
-    const slot = slots[i];
-    if (!slot || !chart.px) {
+  const pieces = [];
+  const pad = 4;
+  ranked.forEach((row, n) => {
+    const chart = row.chart;
+    const edge = chart.px ? Math.max(chart.px.width, chart.px.height) : 0;
+    if (!chart.px || n >= ON_EYE_PRIVATE_CAP || edge < 48 || edge + pad * 2 > 2048) {
       restIds.push(...chart.group.triangles);
       return;
     }
-    let bin = byAtlas.get(slot.atlas);
-    if (!bin) {
-      bin = {
-        data: new Uint8ClampedArray(LANDSD_ON_EYE_ATLAS * LANDSD_ON_EYE_ATLAS * 4),
-        triangles: []
-      };
-      byAtlas.set(slot.atlas, bin);
+    const cw = chart.px.width + pad * 2;
+    const ch = chart.px.height + pad * 2;
+    const data = new Uint8ClampedArray(cw * ch * 4);
+    const slot = { x: 0, contentX: pad, contentY: pad, pad };
+    copyChartPixels(pixels.data, sw, data, cw, chart.px, slot);
+    const partGeo = geometryForTriangles(geo, index, chart.group.triangles);
+    remapChartUv(partGeo, index, chart.group.triangles, sw, sh, chart.px, slot, cw, ch);
+    const canvas = canvasFromPixels(data, cw, ch);
+    if (!canvas) {
+      restIds.push(...chart.group.triangles);
+      partGeo.dispose();
+      return;
     }
-    copyChartPixels(pixels.data, sw, bin.data, LANDSD_ON_EYE_ATLAS, chart.px, slot);
-    bin.triangles.push({ ids: chart.group.triangles, px: chart.px, slot });
-  });
-  if (!byAtlas.size) return null;
-  const pieces = [];
-  for (const bin of byAtlas.values()) {
-    const ids = [];
-    for (const part of bin.triangles) ids.push(...part.ids);
-    const partGeo = geometryForTriangles(geo, index, ids);
-    for (const part of bin.triangles) remapChartUv(partGeo, index, part.ids, sw, sh, part.px, part.slot);
-    const canvas = canvasFromPixels(bin.data, LANDSD_ON_EYE_ATLAS, LANDSD_ON_EYE_ATLAS);
-    if (!canvas) return null;
     const mat = material.clone();
     const tex = atlasTexture(sourceTex, canvas, sampler);
     mat.map = tex;
     if (mat.emissiveMap === sourceTex) mat.emissiveMap = tex;
     pieces.push({ geo: partGeo, material: mat, atlas: true });
-  }
+  });
+  if (!pieces.length) return null;
   if (restIds.length) {
     pieces.push({
       geo: geometryForTriangles(geo, index, restIds),
@@ -937,10 +1092,32 @@ async function mountOneHkGltf(entry, group, colliders) {
       if (mat?.userData?.hkFarChartUnlit) farChartUnlit = true;
     }
   };
+  const paveStreet = boxClosestDistance(entry, HK_STREET_EYE) <= HK_STREET_NEAR;
+  let streetDeck = 0;
   gltf.scene.traverse((obj) => {
     if (!obj.isMesh) return;
     const geo = bakeMesh(obj);
     if (!geo) return;
+    const repaired = repairSliverCharts(geo, obj.material);
+    if (repaired) console.info(`[gltf] sliver charts ${obj.material?.name || entry.file || ''} ${repaired}`);
+    const deck = paveStreet ? detachStreetDeck(geo) : null;
+    if (deck) {
+      const mesh = new THREE.Mesh(deck, streetDeckMaterial());
+      mesh.name = 'HkStreetDeck';
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      mesh.userData.hkBuildingId = buildingIdOf(entry);
+      mesh.userData.hkFile = entry.file || '';
+      mesh.userData.hkSheet = entry.sheet || '';
+      mesh.userData.hkSource = 'landsd';
+      group.add(mesh);
+      meshes++;
+      streetDeck += 1;
+    }
+    if (geo.drawRange.count === 0) {
+      geo.dispose();
+      return;
+    }
     let dropped = 0;
     if (farChase) {
       const seal = sealLandsdFarNullFill(geo, obj.material);
@@ -993,6 +1170,7 @@ async function mountOneHkGltf(entry, group, colliders) {
   }
   if (farChartUnlit) console.info(`[gltf] far-chart unlit ${entry.file || entry.url}`);
   if (farSealed) console.info(`[gltf] far-frame seal ${entry.file || entry.url} triangles ${farSealed}`);
+  if (streetDeck) console.info(`[gltf] street deck ${entry.file || entry.url} meshes ${streetDeck}`);
   if (nullDropped) console.info(`[gltf] ${entry.file || entry.url} null-fill triangles omitted ${nullDropped}`);
   if (!meshes) throw new Error('no meshes');
   colliders.push({

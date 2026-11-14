@@ -540,6 +540,79 @@ export function packLandsdChartBins(rects, atlasSize = LANDSD_ON_EYE_ATLAS, pad 
   return placed;
 }
 
+// A facade triangle whose UV box is a few pixels on one axis and a large
+// fraction of the atlas on the other. On the Des Voeux sheets that is an
+// 8 px slice across several hundred pixels of unrelated charts, which is the
+// striped podium. A real chart is not this thin: the Bank of China window
+// face is about 0.12 on the short side. Repeating charts (UVs outside 0–1,
+// the railing PNGs) are left alone.
+export function landsdUvSliver(minU, minV, maxU, maxV) {
+  if (![minU, minV, maxU, maxV].every(Number.isFinite)) return false;
+  if (minU < -0.02 || minV < -0.02 || maxU > 1.02 || maxV > 1.02) return false;
+  const du = maxU - minU;
+  const dv = maxV - minV;
+  if (!(du > 0) || !(dv > 0)) return false;
+  const long = Math.max(du, dv);
+  const short = Math.min(du, dv);
+  return long >= 0.08 && short < 0.012;
+}
+
+// Grow a rectangle from a seed texel while the cross through the seed stays
+// inside the photograph. LandsD charts are rectangles bounded by the flat
+// gutter, so the cross is the chart. `isGutter(x, y)` is in pixel space.
+// The result is exclusive on x1/y1. A seed on the gutter is not a chart.
+export function growLandsdPhotoRect(x, y, width, height, isGutter, cap = 96) {
+  const w = width | 0;
+  const h = height | 0;
+  const capPx = Math.max(8, cap | 0);
+  const px = x | 0;
+  const py = y | 0;
+  if (px < 0 || py < 0 || px >= w || py >= h) return null;
+  if (typeof isGutter !== 'function' || isGutter(px, py)) return null;
+  let x0 = px;
+  let x1 = px + 1;
+  let y0 = py;
+  let y1 = py + 1;
+  while (x0 > 0 && px - (x0 - 1) <= capPx && !isGutter(x0 - 1, py)) x0 -= 1;
+  while (x1 < w && x1 - px <= capPx && !isGutter(x1, py)) x1 += 1;
+  while (y0 > 0 && py - (y0 - 1) <= capPx && !isGutter(px, y0 - 1)) y0 -= 1;
+  while (y1 < h && y1 - py <= capPx && !isGutter(px, y1)) y1 += 1;
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  return { x0, y0, x1, y1 };
+}
+
+// Three corners of a grown chart, in the same UV space as the file
+// (v = 0 is the first row). The triangle then shows that photograph.
+export function landsdPhotoChartUvs(rect, width, height) {
+  const w = width | 0;
+  const h = height | 0;
+  if (!rect || !(w > 0) || !(h > 0)) return null;
+  const u0 = rect.x0 / w;
+  const u1 = rect.x1 / w;
+  const v0 = rect.y0 / h;
+  const v1 = rect.y1 / h;
+  if (!(u1 > u0) || !(v1 > v0)) return null;
+  return [
+    [u0, v0],
+    [u1, v0],
+    [(u0 + u1) * 0.5, v1]
+  ];
+}
+
+// Up-facing triangles within a few metres of the sidewalk. On the HSBC sheet
+// these are the plaza and the walks: each one a few texels of a different
+// atlas scrap, which is the scrambled pavement. Roofs and walls are not.
+export const LANDSD_STREET_DECK_RISE = 4;
+
+export function landsdStreetDeck(normalY, height, sidewalkY, rise = LANDSD_STREET_DECK_RISE) {
+  if (![normalY, height, sidewalkY].every(Number.isFinite)) return false;
+  if (!(rise > 0)) return false;
+  if (!(normalY > 0.72)) return false;
+  if (height < sidewalkY - 0.4) return false;
+  if (height > sidewalkY + rise) return false;
+  return true;
+}
+
 export function remapLandsdChartUv(u, v, rect) {
   const du = rect.u1 - rect.u0;
   const dv = rect.v1 - rect.v0;
