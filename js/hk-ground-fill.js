@@ -1,7 +1,7 @@
 // Central street canyon. The carriageway keeps its tagged width. Past a narrow
-// curb and sidewalk the next thing is a podium, either meeting a LandsD
-// footprint or standing in for a side that has none. There is no plaza fill
-// and no lawn verge. Victoria Harbour stays outside the island ring.
+// curb and sidewalk a podium closes onto a LandsD footprint. A side with no
+// footprint stays open: a shopfront ribbon there is not a building. There is
+// no plaza fill and no lawn verge. Victoria Harbour stays outside the island ring.
 
 import { digit1ChasePose } from './digit1-probe-frame.js';
 import { carriagewayWidth, HK_CURB_W, HK_WALK_W, segmentFrame } from './hk-road-deck.js';
@@ -146,12 +146,13 @@ function frontage(seg, sign, buildings, asphalt, island, walk, curb, depth, reac
       break;
     }
   }
-  let wallDepth = depth;
-  if (hit != null) {
-    const gap = hit - sidewalkOuter;
-    if (gap <= 0.8) return null;
-    wallDepth = gap <= depth + 6 ? gap + BITE : depth;
-  }
+  // No footprint on this side of the street: the ribbon would be a shopfront
+  // painted onto open ground (the red/green/brown slab beside the 中銀大廈 sign).
+  // A real lot still closes the wall onto its footprint.
+  if (hit == null) return null;
+  const gap = hit - sidewalkOuter;
+  if (gap <= 0.8) return null;
+  let wallDepth = gap <= depth + 6 ? gap + BITE : depth;
   wallDepth = Math.min(depth + 6, Math.max(wallDepth, 0));
   const tries = [wallDepth, Math.min(wallDepth, depth), 8, 5, 3.2];
   for (const candidate of tries) {

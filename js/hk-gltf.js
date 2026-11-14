@@ -16,7 +16,6 @@ import {
   hiddenExtrudeIds,
   hk80ToWorld,
   isGltfPinSheet,
-  isLandsdAtlasGutter,
   landsdAlbedoRow,
   groupLandsdOnEyeCharts,
   isLandsdOnEyeChart,
@@ -30,11 +29,9 @@ import {
   landsdGutterFraction,
   landsdGutterMip,
   landsdLimitMipChain,
+  landsdLooseStrip,
   landsdNullFillTriangles,
-  landsdPhotoChartUvs,
   landsdStreetDeck,
-  landsdUvSliver,
-  growLandsdPhotoRect,
   nullFillSampleSize,
   planGltfManifest,
   remapLandsdChartUv,
@@ -457,13 +454,6 @@ function streetDeckMaterial() {
   return streetDeckMat;
 }
 
-function sheetGutter(sheet) {
-  return (x, y) => {
-    const i = (y * sheet.w + x) * 4;
-    return isLandsdAtlasGutter(sheet.data[i], sheet.data[i + 1], sheet.data[i + 2]);
-  };
-}
-
 function sliverBounds(uv, a, b, c) {
   const u0 = uv.getX(a);
   const v0 = uv.getY(a);
@@ -484,80 +474,64 @@ function sliverBounds(uv, a, b, c) {
   };
 }
 
-// Copy the three corners onto fresh vertices so a shared UV is not rewritten
-// for a neighbour that already samples a real chart.
-function rewriteTriangleUvs(geo, index, triangleStarts, uvsFor) {
-  const names = Object.keys(geo.attributes);
-  const base = geo.getAttribute('position').count;
-  const extra = triangleStarts.length * 3;
-  for (const name of names) {
-    const attr = geo.getAttribute(name);
-    const item = attr.itemSize;
-    const dst = new Float32Array((base + extra) * item);
-    for (let i = 0; i < base; i++) {
-      for (let k = 0; k < item; k++) dst[i * item + k] = attributeComponent(attr, i, k);
-    }
-    geo.setAttribute(name, new THREE.BufferAttribute(dst, item, attr.normalized));
-  }
-  const uv = geo.getAttribute('uv');
-  // A Uint16 index would wrap once the duplicated corners pass 65535.
-  const src = Uint32Array.from(index);
-  let cursor = base;
-  for (let n = 0; n < triangleStarts.length; n++) {
-    const t = triangleStarts[n];
-    const uvs = uvsFor(n);
-    for (let k = 0; k < 3; k++) {
-      const from = src[t + k];
-      for (const name of names) {
-        const attr = geo.getAttribute(name);
-        const item = attr.itemSize;
-        const arr = attr.array;
-        const dst = cursor * item;
-        const origin = from * item;
-        for (let c = 0; c < item; c++) arr[dst + c] = arr[origin + c];
-      }
-      uv.setXY(cursor, uvs[k][0], uvs[k][1]);
-      src[t + k] = cursor;
-      cursor += 1;
-    }
-  }
-  geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(src), 1));
-  geo.clearGroups();
-  uv.needsUpdate = true;
+function streetDeckTriangle(geo, a, b, c) {
+  const pos = geo.getAttribute('position');
+  const nrm = geo.getAttribute('normal');
+  if (!pos || !nrm) return false;
+  const ny = (nrm.getY(a) + nrm.getY(b) + nrm.getY(c)) / 3;
+  const y = (pos.getY(a) + pos.getY(b) + pos.getY(c)) / 3;
+  return landsdStreetDeck(ny, y, ISLAND_BOUNDS.sidewalkHeight);
 }
 
-// A sliver samples a strip of the atlas. Grow the photograph around a corner
-// that is not gutter and aim the triangle at that chart.
-export function repairSliverCharts(geo, material) {
-  const map = albedoMap(material);
-  const uv = geo.getAttribute('uv');
-  if (!map || !uv) return 0;
-  const sheet = nullFillSheet(map);
-  if (!sheet) return 0;
-  const gutter = sheetGutter(sheet);
-  const src = triangleIndex(geo);
-  const starts = [];
-  const charts = [];
-  for (let t = 0; t + 2 < src.length; t += 3) {
-    const bounds = sliverBounds(uv, src[t], src[t + 1], src[t + 2]);
-    if (!landsdUvSliver(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV)) continue;
-    let grown = null;
-    for (const [u, v] of bounds.seeds) {
-      let uu = u % 1;
-      if (uu < 0) uu += 1;
-      const x = Math.min(sheet.w - 1, (uu * sheet.w) | 0);
-      const y = landsdAlbedoRow(v, sheet.h);
-      grown = growLandsdPhotoRect(x, y, sheet.w, sheet.h, gutter);
-      if (grown) break;
-    }
-    const chart = grown ? landsdPhotoChartUvs(grown, sheet.w, sheet.h) : null;
-    if (!chart) continue;
-    starts.push(t);
-    charts.push(chart);
+function triangleExtents(pos, a, b, c) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const index of [a, b, c]) {
+    const x = pos.getX(index);
+    const y = pos.getY(index);
+    const z = pos.getZ(index);
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z;
+    if (z > maxZ) maxZ = z;
   }
-  if (!starts.length) return 0;
-  rewriteTriangleUvs(geo, src, starts, (n) => charts[n]);
-  return starts.length;
+  return [maxX - minX, maxY - minY, maxZ - minZ].sort((left, right) => left - right);
+}
+
+// Drop a sliver that is also a thin ribbon. Leave its neighbours on the UVs
+// the file gave them. Stretching a nearby chart onto the sliver paints a
+// facade the photograph does not have, which is what floated the beige bars
+// between the HSBC columns.
+export function omitLandsdLooseStrips(geo) {
+  const pos = geo.getAttribute('position');
+  const uv = geo.getAttribute('uv');
+  if (!pos || !uv) return 0;
+  const src = triangleIndex(geo);
+  const keep = [];
+  let dropped = 0;
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const bounds = sliverBounds(uv, a, b, c);
+    const ext = triangleExtents(pos, a, b, c);
+    if (streetDeckTriangle(geo, a, b, c)) continue;
+    if (landsdLooseStrip(bounds.minU, bounds.minV, bounds.maxU, bounds.maxV, ext[1], ext[2])) {
+      dropped += 1;
+      continue;
+    }
+    keep.push(a, b, c);
+  }
+  if (!dropped) return 0;
+  geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(keep), 1));
+  geo.clearGroups();
+  return dropped;
 }
 
 // Street-level up-faces leave the photograph. The deck material is continuous
@@ -1098,9 +1072,9 @@ async function mountOneHkGltf(entry, group, colliders) {
     if (!obj.isMesh) return;
     const geo = bakeMesh(obj);
     if (!geo) return;
-    const repaired = repairSliverCharts(geo, obj.material);
-    if (repaired) console.info(`[gltf] sliver charts ${obj.material?.name || entry.file || ''} ${repaired}`);
     const deck = paveStreet ? detachStreetDeck(geo) : null;
+    const loose = omitLandsdLooseStrips(geo);
+    if (loose) console.info(`[gltf] loose strips ${obj.material?.name || entry.file || ''} ${loose}`);
     if (deck) {
       const mesh = new THREE.Mesh(deck, streetDeckMaterial());
       mesh.name = 'HkStreetDeck';

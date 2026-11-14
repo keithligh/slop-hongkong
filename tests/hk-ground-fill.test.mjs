@@ -3,6 +3,8 @@ import test from 'node:test';
 import { HK_CORE_WORLD, HK_RETAIL_BELT, HONG_KONG_ISLAND_COASTLINE, ROADS, BLOCKS, blockInHkCore, hkFootprintHeight } from '../js/city-config.js';
 import { digit1ChasePose } from '../js/digit1-probe-frame.js';
 import { canyonGlassWalls, clipCanyonWalls, digit1EyeFrameHalf, planHkStreetCanyon, pointInRing } from '../js/hk-ground-fill.js';
+import { planHkStreetGround } from '../js/hk-pedestrian.js';
+import { HK_PEDESTRIAN } from '../js/hk-pedestrian-data.js';
 
 function contains(wall, x, z) {
   const dx = x - wall.obb.cx;
@@ -19,7 +21,7 @@ const island = [
   { x: -80, z: 80 }
 ];
 
-test('a setback closes onto the footprint and an empty side gets a street wall', () => {
+test('a setback closes onto the footprint and an empty side stays open', () => {
   const roads = [
     { name: 'QUEEN', w: 7, lanes: 2, dir: 'FT', highway: false, pts: [{ x: 0, z: 0 }, { x: 0, z: 40 }] }
   ];
@@ -35,14 +37,12 @@ test('a setback closes onto the footprint and an empty side gets a street wall',
   const east = plan.walls.filter((wall) => wall.x > 0);
   const west = plan.walls.filter((wall) => wall.x < 0);
   assert.equal(east.length, 1);
-  assert.equal(west.length, 1);
+  assert.equal(west.length, 0);
   assert.ok(east[0].depth < 12, 'the wall stops at the footprint instead of crossing it');
   assert.ok(east[0].depth > 4);
   assert.equal(contains(east[0], 0, 20), false);
   assert.equal(contains(east[0], 12, 20), true);
   assert.equal(contains(east[0], 20, 20), false);
-  assert.ok(Math.abs(west[0].depth - 12) < 0.2);
-  assert.equal(contains(west[0], -10, 20), true);
   assert.equal(pointInRing(0, -40, island), false);
 });
 
@@ -85,8 +85,17 @@ test('Central walls crowd Des Voeux and stay off the harbour', () => {
   assert.ok(plan.walls.length > 200 && plan.walls.length < 8000);
   assert.equal(plan.walls.some((wall) => contains(wall, 0, -860)), false);
   assert.equal(plan.walls.some((wall) => contains(wall, -1.4, 29.3)), false);
-  const verge = plan.walls.some((wall) => contains(wall, -1.4, 14) || contains(wall, -1.4, 8) || contains(wall, 8, 20));
-  assert.equal(verge, true);
+  const ground = planHkStreetGround(HK_PEDESTRIAN, ROADS);
+  const bocStop = ground.stops.find((stop) => stop.name.includes('中銀'));
+  assert.ok(bocStop, '中銀大廈 stop is in the OSM extract');
+  assert.equal(plan.walls.some((wall) => contains(wall, bocStop.x, bocStop.z)), false);
+  // The unbacked ribbon that sat just east of the Bank of China Tower box.
+  assert.equal(plan.walls.some((wall) => contains(wall, 236.3, 175.9)), false);
+  // The eye sidewalk has no lot in reach, so it stays open. A real Des Voeux lot still closes.
+  assert.equal(plan.walls.some((wall) => contains(wall, -1.4, 14) || contains(wall, -1.4, 8) || contains(wall, 8, 20)), false);
+  const desVoeux = plan.walls.find((wall) => wall.raw === 'DES VOEUX ROAD CENTRAL' && wall.depth < 12 && Math.hypot(wall.x + 1.4, wall.z - 29.3) < 50);
+  assert.ok(desVoeux, 'a footprint still closes a Des Voeux wall');
+  assert.ok(desVoeux.depth > 4 && desVoeux.depth < 12);
   for (const wall of plan.walls) {
     assert.equal(pointInRing(wall.x, wall.z, HONG_KONG_ISLAND_COASTLINE), true);
     assert.ok(wall.depth >= 1.5 && wall.depth <= 18.5);

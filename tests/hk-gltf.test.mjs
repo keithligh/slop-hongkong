@@ -61,6 +61,7 @@ import {
   remapLandsdChartUv,
   growLandsdPhotoRect,
   landsdPhotoChartUvs,
+  landsdLooseStrip,
   landsdStreetDeck,
   landsdUvSliver,
   LANDSD_STREET_DECK_RISE,
@@ -873,6 +874,18 @@ test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
   assert.equal(nineC.closestM, 25.5);
 });
 
+test('a thin atlas sliver is a loose strip, and a column face is not', () => {
+  // HSBC soffit ribbons: UV about 0.21 by 0.002, cross-section under half a metre.
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 0.28, 3.4), true);
+  // Same broken UV on a real column or wall panel stays. The photograph is not replaced.
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 1.1, 3.4), false);
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 0.2, 0.4), false);
+  // Bank of China window face, 0.24 by 0.12, is a chart even when the panel is thin.
+  assert.equal(landsdLooseStrip(0.004, 0.258, 0.246, 0.376, 0.2, 4), false);
+  assert.equal(landsdUvSliver(0, 0, 0.21, 0.002), true);
+  assert.equal(landsdUvSliver(0.004, 0.258, 0.246, 0.376), false);
+});
+
 test('a facade sliver grows into its photograph, and a real chart is not a sliver', () => {
   // HSBC wall triangles sit near 0.21 by 0.002. The Bank of China window face is 0.24 by 0.12.
   assert.equal(landsdUvSliver(0, 0, 0.21, 0.002), true);
@@ -955,7 +968,10 @@ test('street-level up-faces are the deck, and walls and roofs stay photographs',
   assert.equal(landsdStreetDeck(0.95, sidewalk + LANDSD_STREET_DECK_RISE + 0.05, sidewalk), false);
   assert.equal(landsdStreetDeck(0.8, sidewalk + 3.5, sidewalk), true);
   const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
-  assert.match(page, /repairSliverCharts\(geo, obj\.material\)/);
+  assert.match(page, /detachStreetDeck\(geo\)[\s\S]{0,240}omitLandsdLooseStrips\(geo\)/);
+  assert.doesNotMatch(page, /repairSliverCharts/);
+  assert.doesNotMatch(page, /landsdPhotoChartUvs/);
+  assert.doesNotMatch(page, /growLandsdPhotoRect/);
   assert.match(page, /detachStreetDeck\(geo\)/);
   assert.match(page, /name = 'hkStreetDeck'/);
   assert.match(page, /boxClosestDistance\(entry, HK_STREET_EYE\) <= HK_STREET_NEAR/);

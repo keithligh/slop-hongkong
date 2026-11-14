@@ -219,8 +219,8 @@ function buildCityGrid(scene, gltfPlan = null) {
   return buildHkCityGrid(scene, gltfPlan);
 }
 
-// Podiums hard against the sidewalk. A LandsD footprint within reach is met;
-// a side with none still gets a street wall. The harbour ring is not walled.
+// Podiums hard against the sidewalk. A LandsD footprint within reach is met.
+// A side with none stays open. The harbour ring is not walled.
 function buildHkStreetCanyon(group, gltfPlan = null) {
   const plan = planHkStreetCanyon({
     roads: ROADS,

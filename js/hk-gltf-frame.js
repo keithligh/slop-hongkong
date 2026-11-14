@@ -557,6 +557,20 @@ export function landsdUvSliver(minU, minV, maxU, maxV) {
   return long >= 0.08 && short < 0.012;
 }
 
+// A loose strip is a sliver UV on a ribbon whose cross-section is too small to
+// be a column or a wall panel. The long axis can still be metres. A real face
+// has a substantial middle dimension even when it is nearly planar, and a
+// white column whose photograph is intact is not a sliver at all.
+export const LANDSD_LOOSE_STRIP_SECTION = 0.55;
+export const LANDSD_LOOSE_STRIP_LENGTH = 0.8;
+
+export function landsdLooseStrip(minU, minV, maxU, maxV, crossSection, length) {
+  if (!landsdUvSliver(minU, minV, maxU, maxV)) return false;
+  if (!(crossSection < LANDSD_LOOSE_STRIP_SECTION)) return false;
+  if (!(length > LANDSD_LOOSE_STRIP_LENGTH)) return false;
+  return true;
+}
+
 // Grow a rectangle from a seed texel while the cross through the seed stays
 // inside the photograph. LandsD charts are rectangles bounded by the flat
 // gutter, so the cross is the chart. `isGutter(x, y)` is in pixel space.
