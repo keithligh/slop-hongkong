@@ -30,7 +30,9 @@ import {
   landsdGutterMip,
   landsdLimitMipChain,
   landsdLooseStrip,
-  landsdShellOpeningQuads,
+  landsdShellCoreWalls,
+  landsdShellStructural,
+  isLandsdNullTexel,
   HK_SHELL_SOLID_ID,
   landsdNullFillTriangles,
   landsdStreetDeck,
@@ -630,9 +632,8 @@ function appendShellQuads(geo, quads) {
   if (normal) normal.needsUpdate = true;
 }
 
-// Panels behind the Court of Final Appeal arches. Each panel keeps the UV of
-// the solid course above it, on that course's own material. Columns, window
-// faces, the dome and the roof are already triangles and are not replaced.
+// The wall on the inner edge of the colonnade. Arches in the outer screen stay
+// open; a sightline through them meets this core. Columns, dome and roof stay.
 export function sealLandsdShellOpenings(geos) {
   const list = (Array.isArray(geos) ? geos : [geos]).filter((geo) => geo?.getAttribute?.('position'));
   if (!list.length) return 0;
@@ -640,7 +641,16 @@ export function sealLandsdShellOpenings(geos) {
   list.forEach((geo, part) => {
     tris.push(...shellTriangles(geo, part));
   });
-  const quads = landsdShellOpeningQuads(tris);
+  const samples = tris.map((tri) => ({
+    x: (tri.p[0][0] + tri.p[1][0] + tri.p[2][0]) / 3,
+    y: (tri.p[0][1] + tri.p[1][1] + tri.p[2][1]) / 3,
+    z: (tri.p[0][2] + tri.p[1][2] + tri.p[2][2]) / 3,
+    ny: tri.ny,
+    u: tri.u,
+    v: tri.v,
+    part: tri.part
+  }));
+  const quads = landsdShellCoreWalls(samples);
   if (!quads.length) return 0;
   const groups = list.map(() => []);
   for (const quad of quads) {
@@ -860,6 +870,59 @@ function triangleIndex(geo) {
   const out = new Uint32Array(n);
   for (let i = 0; i < n; i++) out[i] = i;
   return out;
+}
+
+// The Court of Final Appeal soffit and roof are real shells whose UVs sit on
+// the null grey chart. Point them at a masonry texel from the same mesh so
+// null-fill keeps the surface instead of opening the ceiling.
+function anchorNullShell(geo, material) {
+  const map = albedoMap(material);
+  const uv = geo.getAttribute('uv');
+  const nrm = geo.getAttribute('normal');
+  const pos = geo.getAttribute('position');
+  if (!map || !uv || !nrm || !pos) return 0;
+  const src = triangleIndex(geo);
+  const rgbOf = (index) => {
+    if (index < 0 || index >= uv.count) return null;
+    return sampleAlbedoTexel(map, uv.getX(index), uv.getY(index));
+  };
+  const isNull = (rgb) => !!(rgb && isLandsdNullTexel(rgb[0], rgb[1], rgb[2]));
+  let donorU = null;
+  let donorV = null;
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ny = (nrm.getY(a) + nrm.getY(b) + nrm.getY(c)) / 3;
+    if (Math.abs(ny) > 0.45) continue;
+    const cols = [rgbOf(a), rgbOf(b), rgbOf(c)];
+    if (cols.some((rgb) => rgb && !isNull(rgb))) {
+      donorU = (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3;
+      donorV = (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3;
+      break;
+    }
+  }
+  if (donorU == null) return 0;
+  let moved = 0;
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ny = (nrm.getY(a) + nrm.getY(b) + nrm.getY(c)) / 3;
+    if (!landsdShellStructural(ny)) continue;
+    const cols = [rgbOf(a), rgbOf(b), rgbOf(c)];
+    const cu = (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3;
+    const cv = (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3;
+    const centroid = sampleAlbedoTexel(map, cu, cv);
+    const cornersNull = cols.every(isNull);
+    if (!(cornersNull || isNull(centroid))) continue;
+    uv.setXY(a, donorU, donorV);
+    uv.setXY(b, donorU, donorV);
+    uv.setXY(c, donorU, donorV);
+    moved += 1;
+  }
+  if (moved) uv.needsUpdate = true;
+  return moved;
 }
 
 // Triangles on LandsD null fill are omitted: every corner, or the face centre.
@@ -1224,7 +1287,9 @@ async function mountOneHkGltf(entry, group, colliders) {
     const geo = bakeMesh(obj);
     if (!geo) return;
     const deck = paveStreet ? detachStreetDeck(geo) : null;
-    const loose = omitLandsdLooseStrips(geo);
+    const shell = buildingIdOf(entry) === HK_SHELL_SOLID_ID;
+    if (shell) anchorNullShell(geo, obj.material);
+    const loose = shell ? 0 : omitLandsdLooseStrips(geo);
     if (loose) console.info(`[gltf] loose strips ${obj.material?.name || entry.file || ''} ${loose}`);
     if (deck) {
       const mesh = new THREE.Mesh(deck, streetDeckMaterial());

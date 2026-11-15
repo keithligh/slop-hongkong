@@ -575,129 +575,140 @@ export function landsdLooseStrip(minU, minV, maxU, maxV, crossSection, length) {
 // mesh is a shell: the arch bays have no inner face, so the street shows through.
 export const HK_SHELL_SOLID_ID = 'B345831577701063A0';
 
-// Recessed panels for openings that already have a pier on both sides and a
-// solid course above. A colonnade bay stays an opening in the outer screen;
-// the panel is the masonry the sheet did not reconstruct behind it. An open
-// edge with no lintel, and any up-facing roof, is left alone.
-export const LANDSD_SHELL_CELL = 0.45;
+// Downward soffit and upward roof. The atlas paints these null grey, but they
+// are the shell. A vertical face is not one of them.
+export function landsdShellStructural(ny) {
+  return Number.isFinite(ny) && Math.abs(ny) > 0.4;
+}
 
-export function landsdShellOpeningQuads(tris, cell = LANDSD_SHELL_CELL) {
-  if (!Array.isArray(tris) || !tris.length || !(cell > 0)) return [];
-  const bins = new Map();
+// The wall behind the colonnade. Vertical samples along a row cluster into the
+// near arcade and the far arcade when a void of `gap` metres separates them.
+// The core face is the inner edge of each cluster, so the arches in the outer
+// screen stay open and the wall stands behind them. One cluster, or a roof
+// face, does not grow a wall.
+export function landsdShellCoreWalls(tris, gap = 8, bottom = 0.3, top = 14) {
+  if (!Array.isArray(tris) || !tris.length || !(gap > 0)) return [];
+  const walls = [];
+  const roofs = [];
   for (const tri of tris) {
-    if (!tri?.p || tri.p.length < 3) continue;
+    if (!tri) continue;
+    const y = tri.y;
     const ny = tri.ny;
-    const nx = tri.nx;
-    const nz = tri.nz;
-    if (![nx, ny, nz].every(Number.isFinite)) continue;
-    if (!(Math.abs(ny) < 0.55)) continue;
-    if (Math.hypot(nx, nz) < 0.2) continue;
-    const yaw = Math.atan2(nx, nz);
-    const bin = ((Math.round((yaw + Math.PI) / (Math.PI / 4)) % 8) + 8) % 8;
-    let list = bins.get(bin);
-    if (!list) {
-      list = [];
-      bins.set(bin, list);
+    if (![tri.x, tri.z, y, ny].every(Number.isFinite)) continue;
+    if (landsdShellStructural(ny)) {
+      roofs.push(tri);
+      continue;
     }
-    list.push(tri);
+    if (Math.abs(ny) > 0.45) continue;
+    if (y < 0.8 || y > 12) continue;
+    walls.push(tri);
   }
+  if (walls.length < 4) return [];
+  const donor = walls.find((tri) => Number.isFinite(tri.u) && Number.isFinite(tri.v)) || walls[0];
+  const u = Number.isFinite(donor.u) ? donor.u : 0.5;
+  const v = Number.isFinite(donor.v) ? donor.v : 0.5;
   const quads = [];
-  for (const list of bins.values()) {
-    if (list.length < 4) continue;
-    let nx = 0;
-    let nz = 0;
-    for (const tri of list) {
-      nx += tri.nx;
-      nz += tri.nz;
-    }
-    const len = Math.hypot(nx, nz) || 1;
-    nx /= len;
-    nz /= len;
-    const ax = -nz;
-    const az = nx;
-    const projected = [];
-    for (const tri of list) {
-      const samples = tri.p.slice(0, 3).map((p) => ({
-        along: p[0] * ax + p[2] * az,
-        y: p[1],
-        depth: p[0] * nx + p[2] * nz
-      }));
-      projected.push({
-        depth: (samples[0].depth + samples[1].depth + samples[2].depth) / 3,
-        minA: Math.min(samples[0].along, samples[1].along, samples[2].along),
-        maxA: Math.max(samples[0].along, samples[1].along, samples[2].along),
-        minY: Math.min(samples[0].y, samples[1].y, samples[2].y),
-        maxY: Math.max(samples[0].y, samples[1].y, samples[2].y),
-        u: tri.u,
-        v: tri.v,
-        part: tri.part
-      });
-    }
-    const outer = new Map();
-    for (const face of projected) {
-      const a = Math.round(((face.minA + face.maxA) * 0.5) / cell);
-      const prev = outer.get(a);
-      if (prev == null || face.depth < prev) outer.set(a, face.depth);
-    }
-    const solid = new Map();
-    for (const face of projected) {
-      const aMid = Math.round(((face.minA + face.maxA) * 0.5) / cell);
-      const skin = outer.get(aMid);
-      if (face.depth > skin + 1.3) continue;
-      const a0 = Math.floor(face.minA / cell);
-      const a1 = Math.floor(face.maxA / cell);
-      const y0 = Math.floor(face.minY / cell);
-      const y1 = Math.floor(face.maxY / cell);
-      for (let a = a0; a <= a1; a += 1) {
-        for (let y = y0; y <= y1; y += 1) {
-          const key = `${a},${y}`;
-          if (!solid.has(key)) solid.set(key, face);
-        }
-      }
-    }
-    for (const [a, skin] of outer) {
-      for (let y = 1; y <= 18; y += 1) {
-        const key = `${a},${y}`;
-        if (solid.has(key)) continue;
-        const wy = (y + 0.5) * cell;
-        if (wy < 0.7 || wy > 8.2) continue;
-        let above = null;
-        for (let k = 1; k <= 6; k += 1) {
-          const donor = solid.get(`${a},${y + k}`);
-          if (donor) above = donor;
-        }
-        if (!above) continue;
-        let left = false;
-        let right = false;
-        for (let k = 1; k <= 8; k += 1) {
-          if (solid.has(`${a - k},${y}`)) left = true;
-          if (solid.has(`${a + k},${y}`)) right = true;
-        }
-        if (!left || !right) continue;
-        const yb = y * cell;
-        const yt = (y + 1) * cell;
-        const a0 = a * cell;
-        const a1 = (a + 1) * cell;
-        const depth = skin + 0.4;
-        const at = (along, height) => [
-          nx * depth + ax * along,
-          height,
-          nz * depth + az * along
-        ];
-        quads.push({
-          p: [at(a0, yb), at(a1, yb), at(a1, yt), at(a0, yt)],
-          nx,
-          ny: 0,
-          nz,
-          u: above.u,
-          v: above.v,
-          part: above.part
-        });
-      }
-    }
+  const pushX = (x, z0, z1, nx) => {
+    if (!(z1 - z0 > 0.2)) return;
+    const y1 = coreTop(roofs, (tri) => Math.abs(tri.x - x) < 8 && tri.z >= z0 - 2 && tri.z <= z1 + 2, top);
+    const zA = Math.min(z0, z1);
+    const zB = Math.max(z0, z1);
+    const p = nx < 0
+      ? [[x, bottom, zA], [x, bottom, zB], [x, y1, zB], [x, y1, zA]]
+      : [[x, bottom, zB], [x, bottom, zA], [x, y1, zA], [x, y1, zB]];
+    quads.push({ p, nx, ny: 0, nz: 0, u, v, part: donor.part ?? 0 });
+  };
+  const pushZ = (z, x0, x1, nz) => {
+    if (!(Math.abs(x1 - x0) > 0.2)) return;
+    const y1 = coreTop(roofs, (tri) => Math.abs(tri.z - z) < 8 && tri.x >= Math.min(x0, x1) - 2 && tri.x <= Math.max(x0, x1) + 2, top);
+    const xA = Math.min(x0, x1);
+    const xB = Math.max(x0, x1);
+    const p = nz > 0
+      ? [[xA, bottom, z], [xB, bottom, z], [xB, y1, z], [xA, y1, z]]
+      : [[xB, bottom, z], [xA, bottom, z], [xA, y1, z], [xB, y1, z]];
+    quads.push({ p, nx: 0, ny: 0, nz, u, v, part: donor.part ?? 0 });
+  };
+  const row = 2;
+  const byZ = new Map();
+  const byX = new Map();
+  for (const tri of walls) {
+    const zr = Math.round(tri.z / row) * row;
+    const xr = Math.round(tri.x / row) * row;
+    if (!byZ.has(zr)) byZ.set(zr, []);
+    byZ.get(zr).push(tri.x);
+    if (!byX.has(xr)) byX.set(xr, []);
+    byX.get(xr).push(tri.z);
   }
+  const westInner = new Map();
+  const eastInner = new Map();
+  for (const [z, xs] of byZ) {
+    const groups = cluster1d(xs, gap);
+    if (groups.length < 2) continue;
+    westInner.set(z, groups[0][1]);
+    eastInner.set(z, groups[groups.length - 1][0]);
+  }
+  const northInner = new Map();
+  const southInner = new Map();
+  for (const [x, zs] of byX) {
+    const groups = cluster1d(zs, gap);
+    if (groups.length < 2) continue;
+    northInner.set(x, groups[0][1]);
+    southInner.set(x, groups[groups.length - 1][0]);
+  }
+  // An arch is a few metres with no pier sample. Carry the inner face across
+  // that gap. A missing wing is wider and stays open.
+  for (const [z, x] of bridgeEdge(westInner, row, 6)) pushX(x, z - row * 0.5, z + row * 0.5, -1);
+  for (const [z, x] of bridgeEdge(eastInner, row, 6)) pushX(x, z - row * 0.5, z + row * 0.5, 1);
+  for (const [x, z] of bridgeEdge(northInner, row, 6)) pushZ(z, x - row * 0.5, x + row * 0.5, -1);
+  for (const [x, z] of bridgeEdge(southInner, row, 6)) pushZ(z, x - row * 0.5, x + row * 0.5, 1);
   return quads;
 }
+
+function bridgeEdge(edges, step, limit) {
+  const keys = [...edges.keys()].sort((a, b) => a - b);
+  if (!keys.length) return [];
+  const out = [];
+  for (let cursor = keys[0]; cursor <= keys[keys.length - 1]; cursor += step) {
+    let nearest = null;
+    let best = Infinity;
+    for (const key of keys) {
+      const dist = Math.abs(key - cursor);
+      if (dist < best) {
+        best = dist;
+        nearest = key;
+      }
+    }
+    if (nearest == null || best > limit) continue;
+    out.push([cursor, edges.get(nearest)]);
+  }
+  return out;
+}
+
+function cluster1d(values, gap) {
+  const sorted = [...new Set(values.map((value) => Math.round(value)))].sort((a, b) => a - b);
+  if (!sorted.length) return [];
+  const groups = [];
+  let current = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] - sorted[i - 1] > gap) {
+      groups.push(current);
+      current = [sorted[i]];
+    } else current.push(sorted[i]);
+  }
+  groups.push(current);
+  return groups.map((group) => [group[0], group[group.length - 1]]);
+}
+
+function coreTop(roofs, near, fallback) {
+  let lowest = Infinity;
+  for (const tri of roofs) {
+    if (!near(tri)) continue;
+    if (tri.y > 6 && tri.y < lowest) lowest = tri.y;
+  }
+  if (!Number.isFinite(lowest)) return fallback;
+  return Math.min(fallback, Math.max(8, lowest - 0.2));
+}
+
 
 // Grow a rectangle from a seed texel while the cross through the seed stays
 // inside the photograph. LandsD charts are rectangles bounded by the flat

@@ -62,7 +62,8 @@ import {
   growLandsdPhotoRect,
   landsdPhotoChartUvs,
   landsdLooseStrip,
-  landsdShellOpeningQuads,
+  landsdShellCoreWalls,
+  landsdShellStructural,
   HK_SHELL_SOLID_ID,
   landsdStreetDeck,
   landsdUvSliver,
@@ -876,40 +877,66 @@ test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
   assert.equal(nineC.closestM, 25.5);
 });
 
-test('an arched bay gains inner masonry and an open edge does not', () => {
-  const wall = (x0, x1, y0, y1, u, v) => ([
-    { p: [[x0, y0, 0], [x1, y0, 0], [x1, y1, 0]], nx: 0, ny: 0, nz: -1, u, v },
-    { p: [[x0, y0, 0], [x1, y1, 0], [x0, y1, 0]], nx: 0, ny: 0, nz: -1, u, v }
-  ]);
-  const pier = wall(0, 1.6, 0, 6, 0.2, 0.4).concat(wall(4.2, 5.8, 0, 6, 0.7, 0.4));
-  const lintel = wall(1.6, 4.2, 4.4, 5.8, 0.45, 0.62);
-  const roof = {
-    p: [[0, 6.2, 0], [5.8, 6.2, 0], [5.8, 6.2, 3]],
-    nx: 0,
-    ny: 1,
-    nz: 0,
-    u: 0.1,
-    v: 0.9
-  };
-  const quads = landsdShellOpeningQuads([...pier, ...lintel, roof]);
-  assert.ok(quads.length > 0, 'the bay behind the arch is closed');
+function rayQuad(origin, dir, quads) {
+  let best = null;
   for (const quad of quads) {
-    const xs = quad.p.map((p) => p[0]);
-    const ys = quad.p.map((p) => p[1]);
-    const zs = quad.p.map((p) => p[2]);
-    assert.ok(Math.min(...xs) >= 1.5 && Math.max(...xs) <= 4.3, `panel stays in the bay ${xs}`);
-    assert.ok(Math.min(...ys) >= 0.4 && Math.max(...ys) <= 4.6, `panel stays under the lintel ${ys}`);
-    assert.ok(Math.abs(zs[0]) < 1.2);
-    assert.equal(quad.ny, 0);
-    assert.equal(quad.u, 0.45);
-    assert.equal(quad.v, 0.62);
+    const tris = [
+      [quad.p[0], quad.p[1], quad.p[2]],
+      [quad.p[0], quad.p[2], quad.p[3]]
+    ];
+    for (const tri of tris) {
+      const [v0, v1, v2] = tri;
+      const e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+      const e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+      const p = [dir[1] * e2[2] - dir[2] * e2[1], dir[2] * e2[0] - dir[0] * e2[2], dir[0] * e2[1] - dir[1] * e2[0]];
+      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+      if (Math.abs(det) < 1e-8) continue;
+      const inv = 1 / det;
+      const tv = [origin[0] - v0[0], origin[1] - v0[1], origin[2] - v0[2]];
+      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
+      if (u < 0 || u > 1) continue;
+      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+      const v = (dir[0] * q[0] + dir[1] * q[1] + dir[2] * q[2]) * inv;
+      if (v < 0 || u + v > 1) continue;
+      const tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
+      if (tt > 0.2 && (!best || tt < best)) best = tt;
+    }
   }
-  const openEdge = landsdShellOpeningQuads(wall(0, 1.6, 0, 6, 0.2, 0.4));
-  assert.equal(openEdge.length, 0);
+  return best;
+}
+
+test('a ray through the arcade hits the core wall and the arch plane stays open', () => {
+  // West colonnade x 0..6 with an arch gap at z 8..11, east colonnade x 40..46.
+  // Matches the measured void behind B345831577701063A0. Roof soffit at y 12.
+  const samples = [];
+  for (let z = 0; z <= 20; z += 1) {
+    if (z >= 8 && z <= 11) continue;
+    for (const x of [1, 3, 5]) samples.push({ x, z, y: 3, ny: 0, u: 0.31, v: 0.44 });
+  }
+  for (let z = 0; z <= 20; z += 1) {
+    for (const x of [41, 43, 45]) samples.push({ x, z, y: 4, ny: 0, u: 0.31, v: 0.44 });
+  }
+  for (let x = 8; x <= 38; x += 4) {
+    for (let z = 2; z <= 18; z += 4) samples.push({ x, z, y: 12, ny: -0.9, u: 0.2, v: 0.2 });
+  }
+  const quads = landsdShellCoreWalls(samples);
+  assert.ok(quads.length > 0);
+  const through = rayQuad([-4, 1.7, 9.5], [1, 0, 0], quads);
+  assert.ok(through > 8 && through < 12, `arch ray hits the core at ${through}`);
+  for (const quad of quads) {
+    const x = quad.p[0][0];
+    assert.ok(x < 0.5 || x > 4.5, `panel is not stuffed in the outer arch ${x}`);
+  }
+  const up = rayQuad([20, 2, 10], [0, 1, 0], quads);
+  assert.equal(up, null);
+  assert.equal(landsdShellStructural(-0.8), true);
+  assert.equal(landsdShellStructural(0.1), false);
   assert.equal(HK_SHELL_SOLID_ID, 'B345831577701063A0');
   const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
-  assert.match(page, /sealLandsdShellOpenings\(shellQueue\.map\(\(part\) => part\.geo\)\)[\s\S]{0,500}placePrepared\(part\.geo/);
-  assert.match(page, /omitLandsdLooseStrips\(geo\)/);
+  assert.match(page, /shell \? 0 : omitLandsdLooseStrips\(geo\)/);
+  assert.match(page, /anchorNullShell\(geo, obj\.material\)/);
+  assert.match(page, /landsdShellCoreWalls\(samples\)/);
+  assert.doesNotMatch(page, /landsdShellOpeningQuads/);
 });
 
 test('a thin atlas sliver is a loose strip, and a column face is not', () => {
