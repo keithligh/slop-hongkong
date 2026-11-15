@@ -1,4 +1,4 @@
-import { HK_STREET_EYE } from './city-config.js';
+import { HK_STREET_EYE, HK_STREET_NEAR, HK_WALK_RADIUS } from './city-config.js';
 import { keithEyeGrain, keithEyeMad } from './digit1-far-frame.js';
 import {
   DIGIT1_GROUND_CROPS,
@@ -35,6 +35,21 @@ export const HK_GAME_GROUND_CROPS = Object.freeze(['road-ahead', 'right-kerb', '
 // sidewalk is on the right at ?at=-1.4,29.3,1.29). Down-rays are cast at these.
 const AHEAD = Object.freeze([0, 4, 8, 16]);
 const RIGHT = Object.freeze([3, 5, 7]);
+
+// The coast plate (olive 0x6a7264) reads teal under the sky. Where the LandsD
+// meshes and the canyon ribbons are gone from the 80 m disc, it is the only
+// ground between the OSM pavement and the walls: Statue Square, the bank plaza,
+// the lots behind the kerb. The plate is paved across the walk fence and the
+// overlay disc, and fades back to olive outside it.
+export function digit1PlazaDisc(eye = HK_STREET_EYE) {
+  return Object.freeze({
+    x: eye.x,
+    z: eye.z,
+    inner: HK_STREET_NEAR,
+    outer: HK_STREET_NEAR + 30,
+    walk: HK_WALK_RADIUS
+  });
+}
 
 export function classifyGroundHit(name) {
   if (typeof name !== 'string' || !name) return 'none';

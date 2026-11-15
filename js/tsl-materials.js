@@ -1688,6 +1688,26 @@ const waterBoxCover = Fn(([x, a, b, s]) => {
 });
 
 /**
+ * The coast plate. Olive everywhere except the Digit1 disc, where it is the sidewalk granite on
+ * world metres (paving, joints, grit, AO) blended back into the olive past `inner`, so the disc
+ * has no rim. It is the plate itself and not a second layer on it: a plaza mesh a few millimetres
+ * above the plate lost the depth test within about 20 m of the camera to this plate's own
+ * polygon offset.
+ */
+function createCoastLandMaterial({ x, z, inner, outer, coastHex = 0x6a7264 }) {
+  const mat = createSidewalkMaterial({ ribbon: false });
+  mat.name = 'hkCoastLand';
+  mat.side = THREE.DoubleSide;
+  const reach = length(vec2(positionWorld.x, positionWorld.z).sub(vec2(float(x), float(z))));
+  const paving = float(1.0).sub(smoothstep(float(inner), float(outer), reach));
+  mat.colorNode = mix(color(coastHex), mat.colorNode, paving);
+  mat.aoNode = mix(float(1.0), mat.aoNode, paving);
+  mat.roughnessNode = mix(float(0.94), mat.roughnessNode, paving);
+  mat.metalnessNode = mat.metalnessNode.mul(paving);
+  return mat;
+}
+
+/**
  * Victoria Harbour water: physically based estuary material
  * - Wave normals (normalNode) from 4 rotated, scaled & drifting samples of the LEAN wave texture whose energy follows
  *   slowly drifting wind patches; the slope variance below each pixel footprint (plus always-unresolved capillary
@@ -2045,17 +2065,25 @@ function podiumStreetColor() {
   const wall = float(1.0).sub(step(0.72, abs(n.y)));
   const belt = float(HK_RETAIL_BELT);
   const above = smoothstep(belt, belt.add(0.15), y);
-  const bay = fract(along.mul(HK_SHOP_BAY));
-  const storey = fract(y.sub(belt).div(3.9));
-  const hole = smoothstep(0.28, 0.36, bay).mul(float(1.0).sub(smoothstep(0.64, 0.72, bay)));
-  const punched = above
-    .mul(smoothstep(0.18, 0.26, storey))
-    .mul(float(1.0).sub(smoothstep(0.68, 0.76, storey)))
-    .mul(hole)
-    .mul(wall);
-  const ashlar = vec3(0.63, 0.58, 0.52);
-  const pane = vec3(0.13, 0.17, 0.2);
-  return mix(shop, mix(ashlar, pane, punched), above);
+  const bayCoord = along.mul(HK_SHOP_BAY);
+  const bay = fract(bayCoord);
+  const rise = y.sub(belt).div(3.9);
+  const storey = fract(rise);
+  const fwBay = fwidth(bayCoord);
+  const fwStorey = fwidth(rise);
+  // Openings stay crisp: the old 0.08-wide smoothstep ramps were 0.35 m soft edges at the kerb.
+  const opening = filteredPulse(bay, 0.28, 0.72, fwBay).mul(filteredPulse(storey, 0.2, 0.74, fwStorey));
+  const mullion = min(filteredPulse(bay, 0.485, 0.515, fwBay).add(filteredPulse(storey, 0.6, 0.63, fwStorey)), float(1.0));
+  const sill = filteredPulse(storey, 0.15, 0.2, fwStorey);
+  const course = filteredPulse(fract(y.mul(1.6)), 0.0, 0.05, fwidth(y.mul(1.6)));
+  const bayId = floor(bayCoord);
+  const tone = hash2D(vec2(bayId, floor(rise))).sub(0.5).mul(0.12).add(1.0);
+  const ashlar = vec3(0.46, 0.43, 0.38).mul(tone).mul(float(1.0).sub(course.mul(0.12)));
+  const stone = mix(ashlar, vec3(0.6, 0.56, 0.5), sill);
+  const skyGlass = mix(vec3(0.09, 0.12, 0.16), vec3(0.2, 0.27, 0.34), smoothstep(0.2, 0.74, storey));
+  const pane = mix(skyGlass, vec3(0.3, 0.3, 0.29), mullion);
+  const punched = opening.mul(wall);
+  return mix(shop, mix(stone, pane, punched), above);
 }
 
 function podiumShopGlow() {
@@ -2241,6 +2269,7 @@ export {
   createRoadPaintMaterial,
   createLaneStripeMaterial,
   createSidewalkMaterial,
+  createCoastLandMaterial,
   createCurbMaterial,
   createWaterMaterial,
   createParkLawnMaterial,

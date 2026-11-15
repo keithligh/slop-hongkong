@@ -92,8 +92,8 @@ export const PLAND_FAR_NDC_PAD = 1;
 // The far side stays inside the ray to the Bank of China Tower (side/along ~0.35
 // on the right) and off the centre ray to The Henderson. World y stops at the
 // flank canyon top, so the crown is not a full-height punch. Compare passes no
-// boxes, so the omit does not run. The replacement wall is HkMidbandCanyon
-// (shopfront belt and window grid; still chartless after the Cut #36 sheet hunt).
+// boxes, so the omit does not run. The chase does not fill the plate with an
+// enamel box: that stand-in was the banded midrise. The gap stays chartless.
 export const DIGIT1_MIDBAND_PLATES = Object.freeze([
   Object.freeze({
     id: 'digit1-midband-right',

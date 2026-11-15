@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { HK_CORE_WORLD, HK_GLTF_CAP, HK_GLTF_SHEET, HK_GLTF_SHEETS, HK_STREET_EYE, HK_STREET_NEAR, ISLAND_BOUNDS, hkResolveLandmarks } from '../js/city-config.js';
 import { digit1FarFrameFidelity, keithEyeGrain, keithEyeMad } from '../js/digit1-far-frame.js';
+import { DIGIT1_MIDBAND_PLATES, digit1MidbandWallSpec, worldToHk80 } from '../js/hk-pland-frame.js';
 import {
   HK_BOC_PHOTO_CHART,
   HK_DIGIT1_MIDBAND_GRID_ELIMINATED,
@@ -58,11 +59,22 @@ import {
   landsdNullFillTriangles,
   landsdSealFarNullTriangles,
   remapLandsdChartUv,
+  growLandsdPhotoRect,
+  landsdPhotoChartUvs,
+  landsdLooseStrip,
+  landsdShellCoreWalls,
+  landsdShellStructural,
+  HK_SHELL_SOLID_ID,
+  landsdStreetDeck,
+  landsdUvSliver,
+  LANDSD_STREET_DECK_RISE,
   NULL_FILL_EDGE,
   nullFillSampleSize,
   hk80GridToHk80Geog,
   hk80GridToWgs84,
   hk80ToWorld,
+  HK_DIGIT1_REAL_FRONTAGES,
+  digit1FrontageIds,
   hkpdToSidewalkY,
   isBuildingGltf,
   planGltfManifest,
@@ -863,4 +875,172 @@ test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
   const nineC = HK_DIGIT1_MIDBAND_HUNT[0];
   assert.equal(nineC.closestId, 'B345471572201063A0');
   assert.equal(nineC.closestM, 25.5);
+});
+
+function rayQuad(origin, dir, quads) {
+  let best = null;
+  for (const quad of quads) {
+    const tris = [
+      [quad.p[0], quad.p[1], quad.p[2]],
+      [quad.p[0], quad.p[2], quad.p[3]]
+    ];
+    for (const tri of tris) {
+      const [v0, v1, v2] = tri;
+      const e1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+      const e2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+      const p = [dir[1] * e2[2] - dir[2] * e2[1], dir[2] * e2[0] - dir[0] * e2[2], dir[0] * e2[1] - dir[1] * e2[0]];
+      const det = e1[0] * p[0] + e1[1] * p[1] + e1[2] * p[2];
+      if (Math.abs(det) < 1e-8) continue;
+      const inv = 1 / det;
+      const tv = [origin[0] - v0[0], origin[1] - v0[1], origin[2] - v0[2]];
+      const u = (tv[0] * p[0] + tv[1] * p[1] + tv[2] * p[2]) * inv;
+      if (u < 0 || u > 1) continue;
+      const q = [tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2], tv[0] * e1[1] - tv[1] * e1[0]];
+      const v = (dir[0] * q[0] + dir[1] * q[1] + dir[2] * q[2]) * inv;
+      if (v < 0 || u + v > 1) continue;
+      const tt = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) * inv;
+      if (tt > 0.2 && (!best || tt < best)) best = tt;
+    }
+  }
+  return best;
+}
+
+test('a ray through the arcade hits the core wall and the arch plane stays open', () => {
+  // West colonnade x 0..6 with an arch gap at z 8..11, east colonnade x 40..46.
+  // Matches the measured void behind B345831577701063A0. Roof soffit at y 12.
+  const samples = [];
+  for (let z = 0; z <= 20; z += 1) {
+    if (z >= 8 && z <= 11) continue;
+    for (const x of [1, 3, 5]) samples.push({ x, z, y: 3, ny: 0, u: 0.31, v: 0.44 });
+  }
+  for (let z = 0; z <= 20; z += 1) {
+    for (const x of [41, 43, 45]) samples.push({ x, z, y: 4, ny: 0, u: 0.31, v: 0.44 });
+  }
+  for (let x = 8; x <= 38; x += 4) {
+    for (let z = 2; z <= 18; z += 4) samples.push({ x, z, y: 12, ny: -0.9, u: 0.2, v: 0.2 });
+  }
+  const quads = landsdShellCoreWalls(samples);
+  assert.ok(quads.length > 0);
+  const through = rayQuad([-4, 1.7, 9.5], [1, 0, 0], quads);
+  assert.ok(through > 8 && through < 12, `arch ray hits the core at ${through}`);
+  for (const quad of quads) {
+    const x = quad.p[0][0];
+    assert.ok(x < 0.5 || x > 4.5, `panel is not stuffed in the outer arch ${x}`);
+  }
+  const up = rayQuad([20, 2, 10], [0, 1, 0], quads);
+  assert.equal(up, null);
+  assert.equal(landsdShellStructural(-0.8), true);
+  assert.equal(landsdShellStructural(0.1), false);
+  assert.equal(HK_SHELL_SOLID_ID, 'B345831577701063A0');
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /shell \? 0 : omitLandsdLooseStrips\(geo\)/);
+  assert.match(page, /anchorNullShell\(geo, obj\.material\)/);
+  assert.match(page, /landsdShellCoreWalls\(samples\)/);
+  assert.doesNotMatch(page, /landsdShellOpeningQuads/);
+});
+
+test('a thin atlas sliver is a loose strip, and a column face is not', () => {
+  // HSBC soffit ribbons: UV about 0.21 by 0.002, cross-section under half a metre.
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 0.28, 3.4), true);
+  // Same broken UV on a real column or wall panel stays. The photograph is not replaced.
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 1.1, 3.4), false);
+  assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 0.2, 0.4), false);
+  // Bank of China window face, 0.24 by 0.12, is a chart even when the panel is thin.
+  assert.equal(landsdLooseStrip(0.004, 0.258, 0.246, 0.376, 0.2, 4), false);
+  assert.equal(landsdUvSliver(0, 0, 0.21, 0.002), true);
+  assert.equal(landsdUvSliver(0.004, 0.258, 0.246, 0.376), false);
+});
+
+test('a facade sliver grows into its photograph, and a real chart is not a sliver', () => {
+  // HSBC wall triangles sit near 0.21 by 0.002. The Bank of China window face is 0.24 by 0.12.
+  assert.equal(landsdUvSliver(0, 0, 0.21, 0.002), true);
+  assert.equal(landsdUvSliver(0.004, 0.258, 0.246, 0.376), false);
+  assert.equal(landsdUvSliver(-22, 0, 21, 1), false);
+  const w = 12;
+  const h = 10;
+  const data = new Uint8Array(w * h * 4);
+  for (let i = 0; i < data.length; i += 4) {
+    data[i] = 60;
+    data[i + 1] = 60;
+    data[i + 2] = 60;
+    data[i + 3] = 255;
+  }
+  for (let y = 3; y < 8; y++) {
+    for (let x = 2; x < 6; x++) {
+      const i = (y * w + x) * 4;
+      data[i] = 180;
+      data[i + 1] = 160;
+      data[i + 2] = 140;
+    }
+  }
+  const gutter = (x, y) => isLandsdAtlasGutter(data[(y * w + x) * 4], data[(y * w + x) * 4 + 1], data[(y * w + x) * 4 + 2]);
+  const rect = growLandsdPhotoRect(3, 4, w, h, gutter);
+  assert.deepEqual(rect, { x0: 2, y0: 3, x1: 6, y1: 8 });
+  assert.equal(gutter(rect.x0, rect.y0), false);
+  assert.equal(gutter(1, 4), true);
+  const uvs = landsdPhotoChartUvs(rect, w, h);
+  assert.ok(uvs[1][0] - uvs[0][0] > 0.2);
+  assert.ok(uvs[2][1] - uvs[0][1] > 0.3);
+  assert.equal(growLandsdPhotoRect(0, 0, w, h, gutter), null);
+});
+
+test('the mid-band plates are open ground; the photo frontages stay in the cap', () => {
+  const right = digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[0]).position;
+  const left = digit1MidbandWallSpec(DIGIT1_MIDBAND_PLATES[1]).position;
+  const rightGrid = worldToHk80(right.x, right.z);
+  const leftGrid = worldToHk80(left.x, left.z);
+  // East of the 8D/9C sheet edge at easting 834500.6, so 8D is the wrong sheet.
+  assert.ok(rightGrid.easting > 834520 && rightGrid.easting < 834680);
+  assert.ok(leftGrid.easting > 834520 && leftGrid.easting < 834720);
+  const boc = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'Bank of China Building');
+  const cfa = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'The Court of Final Appeal');
+  const ckc = HK_DIGIT1_REAL_FRONTAGES.find((entry) => entry.name === 'Cheung Kong Center');
+  assert.equal(hkGltfBoxContains(boc, right.x, right.z), false);
+  assert.equal(hkGltfBoxContains(cfa, left.x, left.z), false);
+  assert.equal(hkGltfBoxContains(ckc, right.x, right.z), false);
+  const rightGap = boxClosestDistance(boc, right);
+  const leftGap = boxClosestDistance(cfa, left);
+  const towerGap = boxClosestDistance(ckc, right);
+  assert.ok(rightGap > 25 && rightGap < 40, `BoC gap ${rightGap}`);
+  assert.ok(leftGap > 50 && leftGap < 70, `CFA gap ${leftGap}`);
+  assert.ok(towerGap > 30 && towerGap < 50, `CKC gap ${towerGap}`);
+  const decoys = Array.from({ length: 250 }, (_, index) => ({
+    name: `off-${index}`,
+    file: `off-${index}.gltf`,
+    minX: -500 - index,
+    maxX: -480 - index,
+    minZ: 0,
+    maxZ: 20,
+    minH: 0,
+    maxH: 40,
+    span: 20
+  }));
+  const walls = HK_DIGIT1_REAL_FRONTAGES.map((entry) => ({
+    ...entry,
+    name: entry.id,
+    file: `${entry.id}.gltf`
+  }));
+  const plan = planGltfManifest({ buildings: [...decoys, ...walls] }, { cap: 30, pins: [] });
+  const kept = new Set(plan.selected.map((entry) => entry.name));
+  for (const id of digit1FrontageIds()) assert.equal(kept.has(id), true, id);
+  assert.ok(plan.selected.length <= 30);
+});
+
+test('street-level up-faces are the deck, and walls and roofs stay photographs', () => {
+  const sidewalk = 0.22;
+  assert.equal(landsdStreetDeck(0.9, 0.5, sidewalk), true);
+  assert.equal(landsdStreetDeck(0.2, 0.5, sidewalk), false);
+  assert.equal(landsdStreetDeck(0.95, sidewalk + LANDSD_STREET_DECK_RISE + 0.05, sidewalk), false);
+  assert.equal(landsdStreetDeck(0.8, sidewalk + 3.5, sidewalk), true);
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /detachStreetDeck\(geo\)[\s\S]{0,240}omitLandsdLooseStrips\(geo\)/);
+  assert.doesNotMatch(page, /repairSliverCharts/);
+  assert.doesNotMatch(page, /landsdPhotoChartUvs/);
+  assert.doesNotMatch(page, /growLandsdPhotoRect/);
+  assert.match(page, /detachStreetDeck\(geo\)/);
+  assert.match(page, /name = 'hkStreetDeck'/);
+  assert.match(page, /boxClosestDistance\(entry, HK_STREET_EYE\) <= HK_STREET_NEAR/);
+  assert.match(page, /ON_EYE_PRIVATE_CAP/);
+  assert.match(page, /splitLandsdOnEyeCharts\(geo, material, sampler\)/);
+  assert.doesNotMatch(page, /new Uint8ClampedArray\(LANDSD_ON_EYE_ATLAS \* LANDSD_ON_EYE_ATLAS/);
 });

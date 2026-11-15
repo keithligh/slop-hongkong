@@ -135,9 +135,17 @@ test('signs hang on the street face of a Des Voeux canyon and stay out of the la
     highway: false,
     pts: [{ x: 0, z: 0 }, { x: 0, z: 96 }]
   }];
+  const lot = (minX, maxX) => ({
+    minX,
+    maxX,
+    minZ: 4,
+    maxZ: 92,
+    height: 40,
+    poly: [{ x: minX, z: 4 }, { x: maxX, z: 4 }, { x: maxX, z: 92 }, { x: minX, z: 92 }]
+  });
   const plan = planHkStreetCanyon({
     roads,
-    buildings: [],
+    buildings: [lot(16, 40), lot(-40, -16)],
     core: { minX: -50, maxX: 50, minZ: -20, maxZ: 120 },
     island
   });

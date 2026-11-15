@@ -13,12 +13,12 @@ export const HK_SHOP_BAYS = 4;
 const PLINTH = [72, 68, 62];
 const PIER = [84, 78, 72];
 const MOUTH = [26, 22, 20];
-const TILE = [176, 104, 58];
+const TILE = [128, 104, 86];
 const SIGN = [
-  [148, 40, 34],
-  [28, 96, 70]
+  [132, 48, 42],
+  [34, 88, 68]
 ];
-const COPING = [132, 78, 46];
+const COPING = [96, 88, 80];
 
 function fract(value) {
   return value - Math.floor(value);

@@ -540,6 +540,232 @@ export function packLandsdChartBins(rects, atlasSize = LANDSD_ON_EYE_ATLAS, pad 
   return placed;
 }
 
+// A facade triangle whose UV box is a few pixels on one axis and a large
+// fraction of the atlas on the other. On the Des Voeux sheets that is an
+// 8 px slice across several hundred pixels of unrelated charts, which is the
+// striped podium. A real chart is not this thin: the Bank of China window
+// face is about 0.12 on the short side. Repeating charts (UVs outside 0–1,
+// the railing PNGs) are left alone.
+export function landsdUvSliver(minU, minV, maxU, maxV) {
+  if (![minU, minV, maxU, maxV].every(Number.isFinite)) return false;
+  if (minU < -0.02 || minV < -0.02 || maxU > 1.02 || maxV > 1.02) return false;
+  const du = maxU - minU;
+  const dv = maxV - minV;
+  if (!(du > 0) || !(dv > 0)) return false;
+  const long = Math.max(du, dv);
+  const short = Math.min(du, dv);
+  return long >= 0.08 && short < 0.012;
+}
+
+// A loose strip is a sliver UV on a ribbon whose cross-section is too small to
+// be a column or a wall panel. The long axis can still be metres. A real face
+// has a substantial middle dimension even when it is nearly planar, and a
+// white column whose photograph is intact is not a sliver at all.
+export const LANDSD_LOOSE_STRIP_SECTION = 0.55;
+export const LANDSD_LOOSE_STRIP_LENGTH = 0.8;
+
+export function landsdLooseStrip(minU, minV, maxU, maxV, crossSection, length) {
+  if (!landsdUvSliver(minU, minV, maxU, maxV)) return false;
+  if (!(crossSection < LANDSD_LOOSE_STRIP_SECTION)) return false;
+  if (!(length > LANDSD_LOOSE_STRIP_LENGTH)) return false;
+  return true;
+}
+
+// Former Legislative Council, now the Court of Final Appeal. The individualised
+// mesh is a shell: the arch bays have no inner face, so the street shows through.
+export const HK_SHELL_SOLID_ID = 'B345831577701063A0';
+
+// Downward soffit and upward roof. The atlas paints these null grey, but they
+// are the shell. A vertical face is not one of them.
+export function landsdShellStructural(ny) {
+  return Number.isFinite(ny) && Math.abs(ny) > 0.4;
+}
+
+// The wall behind the colonnade. Vertical samples along a row cluster into the
+// near arcade and the far arcade when a void of `gap` metres separates them.
+// The core face is the inner edge of each cluster, so the arches in the outer
+// screen stay open and the wall stands behind them. One cluster, or a roof
+// face, does not grow a wall.
+export function landsdShellCoreWalls(tris, gap = 8, bottom = 0.3, top = 14) {
+  if (!Array.isArray(tris) || !tris.length || !(gap > 0)) return [];
+  const walls = [];
+  const roofs = [];
+  for (const tri of tris) {
+    if (!tri) continue;
+    const y = tri.y;
+    const ny = tri.ny;
+    if (![tri.x, tri.z, y, ny].every(Number.isFinite)) continue;
+    if (landsdShellStructural(ny)) {
+      roofs.push(tri);
+      continue;
+    }
+    if (Math.abs(ny) > 0.45) continue;
+    if (y < 0.8 || y > 12) continue;
+    walls.push(tri);
+  }
+  if (walls.length < 4) return [];
+  const donor = walls.find((tri) => Number.isFinite(tri.u) && Number.isFinite(tri.v)) || walls[0];
+  const u = Number.isFinite(donor.u) ? donor.u : 0.5;
+  const v = Number.isFinite(donor.v) ? donor.v : 0.5;
+  const quads = [];
+  const pushX = (x, z0, z1, nx) => {
+    if (!(z1 - z0 > 0.2)) return;
+    const y1 = coreTop(roofs, (tri) => Math.abs(tri.x - x) < 8 && tri.z >= z0 - 2 && tri.z <= z1 + 2, top);
+    const zA = Math.min(z0, z1);
+    const zB = Math.max(z0, z1);
+    const p = nx < 0
+      ? [[x, bottom, zA], [x, bottom, zB], [x, y1, zB], [x, y1, zA]]
+      : [[x, bottom, zB], [x, bottom, zA], [x, y1, zA], [x, y1, zB]];
+    quads.push({ p, nx, ny: 0, nz: 0, u, v, part: donor.part ?? 0 });
+  };
+  const pushZ = (z, x0, x1, nz) => {
+    if (!(Math.abs(x1 - x0) > 0.2)) return;
+    const y1 = coreTop(roofs, (tri) => Math.abs(tri.z - z) < 8 && tri.x >= Math.min(x0, x1) - 2 && tri.x <= Math.max(x0, x1) + 2, top);
+    const xA = Math.min(x0, x1);
+    const xB = Math.max(x0, x1);
+    const p = nz > 0
+      ? [[xA, bottom, z], [xB, bottom, z], [xB, y1, z], [xA, y1, z]]
+      : [[xB, bottom, z], [xA, bottom, z], [xA, y1, z], [xB, y1, z]];
+    quads.push({ p, nx: 0, ny: 0, nz, u, v, part: donor.part ?? 0 });
+  };
+  const row = 2;
+  const byZ = new Map();
+  const byX = new Map();
+  for (const tri of walls) {
+    const zr = Math.round(tri.z / row) * row;
+    const xr = Math.round(tri.x / row) * row;
+    if (!byZ.has(zr)) byZ.set(zr, []);
+    byZ.get(zr).push(tri.x);
+    if (!byX.has(xr)) byX.set(xr, []);
+    byX.get(xr).push(tri.z);
+  }
+  const westInner = new Map();
+  const eastInner = new Map();
+  for (const [z, xs] of byZ) {
+    const groups = cluster1d(xs, gap);
+    if (groups.length < 2) continue;
+    westInner.set(z, groups[0][1]);
+    eastInner.set(z, groups[groups.length - 1][0]);
+  }
+  const northInner = new Map();
+  const southInner = new Map();
+  for (const [x, zs] of byX) {
+    const groups = cluster1d(zs, gap);
+    if (groups.length < 2) continue;
+    northInner.set(x, groups[0][1]);
+    southInner.set(x, groups[groups.length - 1][0]);
+  }
+  // An arch is a few metres with no pier sample. Carry the inner face across
+  // that gap. A missing wing is wider and stays open.
+  for (const [z, x] of bridgeEdge(westInner, row, 6)) pushX(x, z - row * 0.5, z + row * 0.5, -1);
+  for (const [z, x] of bridgeEdge(eastInner, row, 6)) pushX(x, z - row * 0.5, z + row * 0.5, 1);
+  for (const [x, z] of bridgeEdge(northInner, row, 6)) pushZ(z, x - row * 0.5, x + row * 0.5, -1);
+  for (const [x, z] of bridgeEdge(southInner, row, 6)) pushZ(z, x - row * 0.5, x + row * 0.5, 1);
+  return quads;
+}
+
+function bridgeEdge(edges, step, limit) {
+  const keys = [...edges.keys()].sort((a, b) => a - b);
+  if (!keys.length) return [];
+  const out = [];
+  for (let cursor = keys[0]; cursor <= keys[keys.length - 1]; cursor += step) {
+    let nearest = null;
+    let best = Infinity;
+    for (const key of keys) {
+      const dist = Math.abs(key - cursor);
+      if (dist < best) {
+        best = dist;
+        nearest = key;
+      }
+    }
+    if (nearest == null || best > limit) continue;
+    out.push([cursor, edges.get(nearest)]);
+  }
+  return out;
+}
+
+function cluster1d(values, gap) {
+  const sorted = [...new Set(values.map((value) => Math.round(value)))].sort((a, b) => a - b);
+  if (!sorted.length) return [];
+  const groups = [];
+  let current = [sorted[0]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] - sorted[i - 1] > gap) {
+      groups.push(current);
+      current = [sorted[i]];
+    } else current.push(sorted[i]);
+  }
+  groups.push(current);
+  return groups.map((group) => [group[0], group[group.length - 1]]);
+}
+
+function coreTop(roofs, near, fallback) {
+  let lowest = Infinity;
+  for (const tri of roofs) {
+    if (!near(tri)) continue;
+    if (tri.y > 6 && tri.y < lowest) lowest = tri.y;
+  }
+  if (!Number.isFinite(lowest)) return fallback;
+  return Math.min(fallback, Math.max(8, lowest - 0.2));
+}
+
+
+// Grow a rectangle from a seed texel while the cross through the seed stays
+// inside the photograph. LandsD charts are rectangles bounded by the flat
+// gutter, so the cross is the chart. `isGutter(x, y)` is in pixel space.
+// The result is exclusive on x1/y1. A seed on the gutter is not a chart.
+export function growLandsdPhotoRect(x, y, width, height, isGutter, cap = 96) {
+  const w = width | 0;
+  const h = height | 0;
+  const capPx = Math.max(8, cap | 0);
+  const px = x | 0;
+  const py = y | 0;
+  if (px < 0 || py < 0 || px >= w || py >= h) return null;
+  if (typeof isGutter !== 'function' || isGutter(px, py)) return null;
+  let x0 = px;
+  let x1 = px + 1;
+  let y0 = py;
+  let y1 = py + 1;
+  while (x0 > 0 && px - (x0 - 1) <= capPx && !isGutter(x0 - 1, py)) x0 -= 1;
+  while (x1 < w && x1 - px <= capPx && !isGutter(x1, py)) x1 += 1;
+  while (y0 > 0 && py - (y0 - 1) <= capPx && !isGutter(px, y0 - 1)) y0 -= 1;
+  while (y1 < h && y1 - py <= capPx && !isGutter(px, y1)) y1 += 1;
+  if (x1 - x0 < 2 || y1 - y0 < 2) return null;
+  return { x0, y0, x1, y1 };
+}
+
+// Three corners of a grown chart, in the same UV space as the file
+// (v = 0 is the first row). The triangle then shows that photograph.
+export function landsdPhotoChartUvs(rect, width, height) {
+  const w = width | 0;
+  const h = height | 0;
+  if (!rect || !(w > 0) || !(h > 0)) return null;
+  const u0 = rect.x0 / w;
+  const u1 = rect.x1 / w;
+  const v0 = rect.y0 / h;
+  const v1 = rect.y1 / h;
+  if (!(u1 > u0) || !(v1 > v0)) return null;
+  return [
+    [u0, v0],
+    [u1, v0],
+    [(u0 + u1) * 0.5, v1]
+  ];
+}
+
+// Up-facing triangles within a few metres of the sidewalk. On the HSBC sheet
+// these are the plaza and the walks: each one a few texels of a different
+// atlas scrap, which is the scrambled pavement. Roofs and walls are not.
+export const LANDSD_STREET_DECK_RISE = 4;
+
+export function landsdStreetDeck(normalY, height, sidewalkY, rise = LANDSD_STREET_DECK_RISE) {
+  if (![normalY, height, sidewalkY].every(Number.isFinite)) return false;
+  if (!(rise > 0)) return false;
+  if (!(normalY > 0.72)) return false;
+  if (height < sidewalkY - 0.4) return false;
+  if (height > sidewalkY + rise) return false;
+  return true;
+}
+
 export function remapLandsdChartUv(u, v, rect) {
   const du = rect.u1 - rect.u0;
   const dv = rect.v1 - rect.v0;
@@ -1215,6 +1441,85 @@ export const HK_DIGIT1_MIDBAND_GRID_ELIMINATED = Object.freeze([
   Object.freeze({ sheet: '11-SW-8C', minM: 839 })
 ]);
 
+// Real individualised meshes beside the two mid-band plates. The plates themselves
+// are not buildings: the right one is the Chater Garden bus stop on Des Voeux
+// (22.28018 N, 114.16062 E) and the left one is Queensway (22.28048 N, 114.16120 E).
+// LandsD building polygons return nothing on either plate. These boxes are the
+// glTF bounds, and they match the LandsD footprints within about 5 m.
+// 11-SW-8D (781 BUILDING glTF) has nothing within 40 m of either plate.
+export const HK_DIGIT1_REAL_FRONTAGES = Object.freeze([
+  Object.freeze({
+    id: 'B345471572201063A0',
+    name: 'Bank of China Building',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-right',
+    minX: 12.9,
+    maxX: 55.4,
+    minZ: 49.8,
+    maxZ: 95.7,
+    span: 46
+  }),
+  Object.freeze({
+    id: 'B345831563001063A0',
+    name: 'Cheung Kong Center',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-right',
+    minX: 43.1,
+    maxX: 109.6,
+    minZ: 114.8,
+    maxZ: 181,
+    span: 66.5
+  }),
+  Object.freeze({
+    id: 'B345831577701063A0',
+    name: 'The Court of Final Appeal',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-left',
+    minX: 29.4,
+    maxX: 86.2,
+    minZ: -43,
+    maxZ: 35.4,
+    span: 78.5
+  }),
+  Object.freeze({
+    id: 'B347491569901063A0',
+    name: 'The Henderson',
+    sheet: '11-SW-9C',
+    beside: 'digit1-midband-left',
+    minX: 217.5,
+    maxX: 263.6,
+    minZ: 53.7,
+    maxZ: 105,
+    span: 51.2
+  }),
+  Object.freeze({
+    id: 'B348641561601063A0',
+    name: 'Lippo Centre',
+    sheet: '11-SW-9C',
+    beside: 'east',
+    minX: 341.1,
+    maxX: 383.7,
+    minZ: 135.4,
+    maxZ: 178.3,
+    span: 42.9
+  }),
+  Object.freeze({
+    id: 'B344751569101063A0',
+    name: 'HSBC Main Building',
+    sheet: '11-SW-8D',
+    beside: 'eye',
+    minX: -66.9,
+    maxX: 13.4,
+    minZ: 29.2,
+    maxZ: 102.1,
+    span: 80.3
+  })
+]);
+
+export function digit1FrontageIds(frontages = HK_DIGIT1_REAL_FRONTAGES) {
+  return new Set((frontages || []).map((entry) => entry.id));
+}
+
 // Closest non-BUILDING feature that is not a sheet-wide tile. Not a photograph to pin.
 export const HK_DIGIT1_MIDBAND_NOT_BUILDING = Object.freeze({
   sheet: '11-SW-9C',
@@ -1275,10 +1580,13 @@ export function planGltfManifest(manifest, {
     masses.push({ ...entry, dist: boxClosestDistance(entry, eye) });
   }
   const pinBoxes = pins || bankOfChinaPins();
+  const frontageIds = digit1FrontageIds();
   const pinned = [];
+  const frontages = [];
   const rest = [];
   for (const entry of masses) {
     if (pinBoxes.some((pin) => footprintOverlapRatio(pin, entry, 2) >= 0.15)) pinned.push(entry);
+    else if (frontageIds.has(entry.name)) frontages.push(entry);
     else rest.push(entry);
   }
   // Street faces first. A nearer Sheung Wan block behind the camera must not
@@ -1289,8 +1597,9 @@ export function planGltfManifest(manifest, {
     return pa - pb || a.dist - b.dist || (b.span - a.span);
   };
   pinned.sort(byChase);
+  frontages.sort(byChase);
   rest.sort(byChase);
-  const selected = pinned.concat(rest).slice(0, cap).map(({ dist, ...entry }) => entry);
+  const selected = pinned.concat(frontages, rest).slice(0, cap).map(({ dist, ...entry }) => entry);
   return {
     sheet: manifest?.sheet || '',
     reason: manifest?.reason || '',

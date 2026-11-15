@@ -479,17 +479,11 @@ export function digit1MidbandCanyonFidelity(sources) {
   if (!/omitted \$\{midband\} triangles on the Digit1 mid-band chartless plate/.test(page)) return false;
   if (!/boxes\?\.length && plandOmitsDigit1MidbandPlate/.test(page)) return false;
   const buildings = sources?.buildings || '';
-  if (!/HkMidbandCanyon/.test(buildings)) return false;
-  if (!/createMidbandCanyonMaterial/.test(buildings)) return false;
-  if (!/plandMode === 'compare'/.test(buildings)) return false;
+  if (!/function addDigit1MidbandWalls/.test(buildings)) return false;
+  if (/mesh\.name = 'HkMidbandCanyon'/.test(buildings)) return false;
+  if (/new THREE\.BoxGeometry/.test(buildings)) return false;
   if (/hkShopfrontAlbedo/.test(buildings)) return false;
   if (/hkCorridorPodiumFill/.test(buildings)) return false;
-  const materials = sources?.materials || '';
-  const start = materials.indexOf('function createMidbandCanyonMaterial');
-  const end = materials.indexOf('export {', start);
-  const body = start >= 0 && end > start ? materials.slice(start, end) : '';
-  if (!/mat\.name = 'hkMidbandCanyon'/.test(body)) return false;
-  if (/hkShopfrontAlbedo|0x8a847c|createCurtainWallMaterial|hkTowerGlass/.test(body)) return false;
   return true;
 }
 
@@ -497,32 +491,19 @@ export function digit1MidbandCanyonFidelity(sources) {
 // BUILDING photograph. The stand-in is a two-storey opaque shopfront and a
 // window grid above it. Flat stone courses, the orange atlas, corridor ashlar,
 // and curtain glass to the pavement fail. Sleeping Dogs is not this bar.
+// The enamel stand-in is not the chase face. MSI at the 49.5 m stop showed
+// those two boxes as the yellow/pink/green midrise and the blue/white tower.
+// The plates stay in the PlanD omit. The page does not build the boxes.
 export function digit1MidbandFacadeFidelity(sources) {
-  const materials = sources?.materials || '';
-  const start = materials.indexOf('function createMidbandCanyonMaterial');
-  const end = materials.indexOf('export {', start);
-  const body = start >= 0 && end > start ? materials.slice(start, end) : '';
-  if (!/mat\.name = 'hkMidbandCanyon'/.test(body)) return false;
-  if (!/HK_RETAIL_BELT/.test(body)) return false;
-  if (!/HK_STREET_EYE/.test(body)) return false;
-  if (!/const podium/.test(body)) return false;
-  if (!/shopMouth/.test(body)) return false;
-  if (!/signBand/.test(body)) return false;
-  if (!/mullion/.test(body)) return false;
-  if (!/const pane/.test(body)) return false;
-  if (!/storey/.test(body)) return false;
-  if (!/emissiveNode/.test(body)) return false;
-  if (!/roughnessNode/.test(body)) return false;
-  if (!/mix\(upper, podiumCol, frame\.podium\)/.test(body)) return false;
-  if (/vec3\(0\.76,\s*0\.69,\s*0\.58\)/.test(body)) return false;
-  if (/y\.mul\(0\.46\)/.test(body)) return false;
-  if (/hkShopfrontAlbedo|0x8a847c|createCurtainWallMaterial|hkTowerGlass|podiumStreetColor/.test(body)) return false;
   const buildings = sources?.buildings || '';
-  if (!/mesh\.userData\.hkSource = 'footprint'/.test(buildings)) return false;
-  if (!/new THREE\.BoxGeometry/.test(buildings)) return false;
-  if (!/plandMode === 'compare'/.test(buildings)) return false;
+  if (!/function addDigit1MidbandWalls/.test(buildings)) return false;
+  if (/mesh\.name = 'HkMidbandCanyon'/.test(buildings)) return false;
+  if (/new THREE\.BoxGeometry/.test(buildings)) return false;
+  if (/createMidbandCanyonMaterial\(/.test(buildings)) return false;
   if (/hkShopfrontAlbedo|hkCorridorPodiumFill/.test(buildings)) return false;
   if (DIGIT1_MIDBAND_PLATES.length !== 2) return false;
+  const page = sources?.pland || '';
+  if (!/plandOmitsDigit1MidbandPlate/.test(page)) return false;
   return true;
 }
 
@@ -608,7 +589,7 @@ export function digit1MidbandPhotoFidelity(sources) {
       if (!fetchSrc.includes(chart.sheet)) return false;
       if (!frame.includes(chart.id)) return false;
     }
-    if (!/HkMidbandCanyon/.test(buildings)) return false;
+    if (/mesh\.name = 'HkMidbandCanyon'/.test(buildings)) return false;
     return true;
   }
   return false;
