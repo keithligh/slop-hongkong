@@ -62,6 +62,8 @@ import {
   growLandsdPhotoRect,
   landsdPhotoChartUvs,
   landsdLooseStrip,
+  landsdShellOpeningQuads,
+  HK_SHELL_SOLID_ID,
   landsdStreetDeck,
   landsdUvSliver,
   LANDSD_STREET_DECK_RISE,
@@ -874,6 +876,42 @@ test('Digit1 mid-band hits stay outside every hunted BUILDING mesh', () => {
   assert.equal(nineC.closestM, 25.5);
 });
 
+test('an arched bay gains inner masonry and an open edge does not', () => {
+  const wall = (x0, x1, y0, y1, u, v) => ([
+    { p: [[x0, y0, 0], [x1, y0, 0], [x1, y1, 0]], nx: 0, ny: 0, nz: -1, u, v },
+    { p: [[x0, y0, 0], [x1, y1, 0], [x0, y1, 0]], nx: 0, ny: 0, nz: -1, u, v }
+  ]);
+  const pier = wall(0, 1.6, 0, 6, 0.2, 0.4).concat(wall(4.2, 5.8, 0, 6, 0.7, 0.4));
+  const lintel = wall(1.6, 4.2, 4.4, 5.8, 0.45, 0.62);
+  const roof = {
+    p: [[0, 6.2, 0], [5.8, 6.2, 0], [5.8, 6.2, 3]],
+    nx: 0,
+    ny: 1,
+    nz: 0,
+    u: 0.1,
+    v: 0.9
+  };
+  const quads = landsdShellOpeningQuads([...pier, ...lintel, roof]);
+  assert.ok(quads.length > 0, 'the bay behind the arch is closed');
+  for (const quad of quads) {
+    const xs = quad.p.map((p) => p[0]);
+    const ys = quad.p.map((p) => p[1]);
+    const zs = quad.p.map((p) => p[2]);
+    assert.ok(Math.min(...xs) >= 1.5 && Math.max(...xs) <= 4.3, `panel stays in the bay ${xs}`);
+    assert.ok(Math.min(...ys) >= 0.4 && Math.max(...ys) <= 4.6, `panel stays under the lintel ${ys}`);
+    assert.ok(Math.abs(zs[0]) < 1.2);
+    assert.equal(quad.ny, 0);
+    assert.equal(quad.u, 0.45);
+    assert.equal(quad.v, 0.62);
+  }
+  const openEdge = landsdShellOpeningQuads(wall(0, 1.6, 0, 6, 0.2, 0.4));
+  assert.equal(openEdge.length, 0);
+  assert.equal(HK_SHELL_SOLID_ID, 'B345831577701063A0');
+  const page = readFileSync(path.join(root, 'js/hk-gltf.js'), 'utf8');
+  assert.match(page, /sealLandsdShellOpenings\(shellQueue\.map\(\(part\) => part\.geo\)\)[\s\S]{0,500}placePrepared\(part\.geo/);
+  assert.match(page, /omitLandsdLooseStrips\(geo\)/);
+});
+
 test('a thin atlas sliver is a loose strip, and a column face is not', () => {
   // HSBC soffit ribbons: UV about 0.21 by 0.002, cross-section under half a metre.
   assert.equal(landsdLooseStrip(0, 0, 0.21, 0.002, 0.28, 3.4), true);
@@ -976,6 +1014,6 @@ test('street-level up-faces are the deck, and walls and roofs stay photographs',
   assert.match(page, /name = 'hkStreetDeck'/);
   assert.match(page, /boxClosestDistance\(entry, HK_STREET_EYE\) <= HK_STREET_NEAR/);
   assert.match(page, /ON_EYE_PRIVATE_CAP/);
-  assert.match(page, /splitLandsdOnEyeCharts\(geo, obj\.material, sampler\)/);
+  assert.match(page, /splitLandsdOnEyeCharts\(geo, material, sampler\)/);
   assert.doesNotMatch(page, /new Uint8ClampedArray\(LANDSD_ON_EYE_ATLAS \* LANDSD_ON_EYE_ATLAS/);
 });

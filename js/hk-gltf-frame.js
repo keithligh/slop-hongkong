@@ -571,6 +571,134 @@ export function landsdLooseStrip(minU, minV, maxU, maxV, crossSection, length) {
   return true;
 }
 
+// Former Legislative Council, now the Court of Final Appeal. The individualised
+// mesh is a shell: the arch bays have no inner face, so the street shows through.
+export const HK_SHELL_SOLID_ID = 'B345831577701063A0';
+
+// Recessed panels for openings that already have a pier on both sides and a
+// solid course above. A colonnade bay stays an opening in the outer screen;
+// the panel is the masonry the sheet did not reconstruct behind it. An open
+// edge with no lintel, and any up-facing roof, is left alone.
+export const LANDSD_SHELL_CELL = 0.45;
+
+export function landsdShellOpeningQuads(tris, cell = LANDSD_SHELL_CELL) {
+  if (!Array.isArray(tris) || !tris.length || !(cell > 0)) return [];
+  const bins = new Map();
+  for (const tri of tris) {
+    if (!tri?.p || tri.p.length < 3) continue;
+    const ny = tri.ny;
+    const nx = tri.nx;
+    const nz = tri.nz;
+    if (![nx, ny, nz].every(Number.isFinite)) continue;
+    if (!(Math.abs(ny) < 0.55)) continue;
+    if (Math.hypot(nx, nz) < 0.2) continue;
+    const yaw = Math.atan2(nx, nz);
+    const bin = ((Math.round((yaw + Math.PI) / (Math.PI / 4)) % 8) + 8) % 8;
+    let list = bins.get(bin);
+    if (!list) {
+      list = [];
+      bins.set(bin, list);
+    }
+    list.push(tri);
+  }
+  const quads = [];
+  for (const list of bins.values()) {
+    if (list.length < 4) continue;
+    let nx = 0;
+    let nz = 0;
+    for (const tri of list) {
+      nx += tri.nx;
+      nz += tri.nz;
+    }
+    const len = Math.hypot(nx, nz) || 1;
+    nx /= len;
+    nz /= len;
+    const ax = -nz;
+    const az = nx;
+    const projected = [];
+    for (const tri of list) {
+      const samples = tri.p.slice(0, 3).map((p) => ({
+        along: p[0] * ax + p[2] * az,
+        y: p[1],
+        depth: p[0] * nx + p[2] * nz
+      }));
+      projected.push({
+        depth: (samples[0].depth + samples[1].depth + samples[2].depth) / 3,
+        minA: Math.min(samples[0].along, samples[1].along, samples[2].along),
+        maxA: Math.max(samples[0].along, samples[1].along, samples[2].along),
+        minY: Math.min(samples[0].y, samples[1].y, samples[2].y),
+        maxY: Math.max(samples[0].y, samples[1].y, samples[2].y),
+        u: tri.u,
+        v: tri.v,
+        part: tri.part
+      });
+    }
+    const outer = new Map();
+    for (const face of projected) {
+      const a = Math.round(((face.minA + face.maxA) * 0.5) / cell);
+      const prev = outer.get(a);
+      if (prev == null || face.depth < prev) outer.set(a, face.depth);
+    }
+    const solid = new Map();
+    for (const face of projected) {
+      const aMid = Math.round(((face.minA + face.maxA) * 0.5) / cell);
+      const skin = outer.get(aMid);
+      if (face.depth > skin + 1.3) continue;
+      const a0 = Math.floor(face.minA / cell);
+      const a1 = Math.floor(face.maxA / cell);
+      const y0 = Math.floor(face.minY / cell);
+      const y1 = Math.floor(face.maxY / cell);
+      for (let a = a0; a <= a1; a += 1) {
+        for (let y = y0; y <= y1; y += 1) {
+          const key = `${a},${y}`;
+          if (!solid.has(key)) solid.set(key, face);
+        }
+      }
+    }
+    for (const [a, skin] of outer) {
+      for (let y = 1; y <= 18; y += 1) {
+        const key = `${a},${y}`;
+        if (solid.has(key)) continue;
+        const wy = (y + 0.5) * cell;
+        if (wy < 0.7 || wy > 8.2) continue;
+        let above = null;
+        for (let k = 1; k <= 6; k += 1) {
+          const donor = solid.get(`${a},${y + k}`);
+          if (donor) above = donor;
+        }
+        if (!above) continue;
+        let left = false;
+        let right = false;
+        for (let k = 1; k <= 8; k += 1) {
+          if (solid.has(`${a - k},${y}`)) left = true;
+          if (solid.has(`${a + k},${y}`)) right = true;
+        }
+        if (!left || !right) continue;
+        const yb = y * cell;
+        const yt = (y + 1) * cell;
+        const a0 = a * cell;
+        const a1 = (a + 1) * cell;
+        const depth = skin + 0.4;
+        const at = (along, height) => [
+          nx * depth + ax * along,
+          height,
+          nz * depth + az * along
+        ];
+        quads.push({
+          p: [at(a0, yb), at(a1, yb), at(a1, yt), at(a0, yt)],
+          nx,
+          ny: 0,
+          nz,
+          u: above.u,
+          v: above.v,
+          part: above.part
+        });
+      }
+    }
+  }
+  return quads;
+}
+
 // Grow a rectangle from a seed texel while the cross through the seed stays
 // inside the photograph. LandsD charts are rectangles bounded by the flat
 // gutter, so the cross is the chart. `isGutter(x, y)` is in pixel space.

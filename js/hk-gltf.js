@@ -30,6 +30,8 @@ import {
   landsdGutterMip,
   landsdLimitMipChain,
   landsdLooseStrip,
+  landsdShellOpeningQuads,
+  HK_SHELL_SOLID_ID,
   landsdNullFillTriangles,
   landsdStreetDeck,
   nullFillSampleSize,
@@ -532,6 +534,121 @@ export function omitLandsdLooseStrips(geo) {
   geo.setIndex(new THREE.BufferAttribute(Uint32Array.from(keep), 1));
   geo.clearGroups();
   return dropped;
+}
+
+function shellTriangles(geo, part) {
+  const pos = geo.getAttribute('position');
+  const uv = geo.getAttribute('uv');
+  if (!pos || !uv) return [];
+  const nrm = geo.getAttribute('normal');
+  const src = triangleIndex(geo);
+  const tris = [];
+  for (let t = 0; t + 2 < src.length; t += 3) {
+    const a = src[t];
+    const b = src[t + 1];
+    const c = src[t + 2];
+    const ax = pos.getX(a);
+    const ay = pos.getY(a);
+    const az = pos.getZ(a);
+    const bx = pos.getX(b);
+    const by = pos.getY(b);
+    const bz = pos.getZ(b);
+    const cx = pos.getX(c);
+    const cy = pos.getY(c);
+    const cz = pos.getZ(c);
+    let nx = (by - ay) * (cz - az) - (bz - az) * (cy - ay);
+    let ny = (bz - az) * (cx - ax) - (bx - ax) * (cz - az);
+    let nz = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (nrm) {
+      nx = nrm.getX(a) + nrm.getX(b) + nrm.getX(c);
+      ny = nrm.getY(a) + nrm.getY(b) + nrm.getY(c);
+      nz = nrm.getZ(a) + nrm.getZ(b) + nrm.getZ(c);
+    }
+    const len = Math.hypot(nx, ny, nz) || 1;
+    tris.push({
+      p: [
+        [ax, ay, az],
+        [bx, by, bz],
+        [cx, cy, cz]
+      ],
+      nx: nx / len,
+      ny: ny / len,
+      nz: nz / len,
+      u: (uv.getX(a) + uv.getX(b) + uv.getX(c)) / 3,
+      v: (uv.getY(a) + uv.getY(b) + uv.getY(c)) / 3,
+      part
+    });
+  }
+  return tris;
+}
+
+function appendShellQuads(geo, quads) {
+  if (!quads.length) return;
+  const pos = geo.getAttribute('position');
+  const src = triangleIndex(geo);
+  const base = pos.count;
+  const extra = quads.length * 4;
+  for (const name of Object.keys(geo.attributes)) {
+    const attr = geo.getAttribute(name);
+    const item = attr.itemSize;
+    const dst = new Float32Array((base + extra) * item);
+    const srcArr = attr.array;
+    for (let i = 0; i < base * item; i += 1) dst[i] = srcArr[i];
+    geo.setAttribute(name, new THREE.BufferAttribute(dst, item, attr.normalized));
+  }
+  const position = geo.getAttribute('position');
+  const normal = geo.getAttribute('normal');
+  const uvAttr = geo.getAttribute('uv');
+  quads.forEach((quad, n) => {
+    const at = base + n * 4;
+    for (let k = 0; k < 4; k += 1) {
+      position.setXYZ(at + k, quad.p[k][0], quad.p[k][1], quad.p[k][2]);
+      if (normal) normal.setXYZ(at + k, quad.nx, quad.ny, quad.nz);
+      if (uvAttr) uvAttr.setXY(at + k, quad.u, quad.v);
+    }
+  });
+  const index = new Uint32Array(src.length + quads.length * 6);
+  index.set(src);
+  let cursor = src.length;
+  quads.forEach((quad, n) => {
+    const at = base + n * 4;
+    index[cursor] = at;
+    index[cursor + 1] = at + 1;
+    index[cursor + 2] = at + 2;
+    index[cursor + 3] = at;
+    index[cursor + 4] = at + 2;
+    index[cursor + 5] = at + 3;
+    cursor += 6;
+  });
+  geo.setIndex(new THREE.BufferAttribute(index, 1));
+  geo.clearGroups();
+  geo.setDrawRange(0, Infinity);
+  geo.computeBoundingBox();
+  geo.computeBoundingSphere();
+  position.needsUpdate = true;
+  if (uvAttr) uvAttr.needsUpdate = true;
+  if (normal) normal.needsUpdate = true;
+}
+
+// Panels behind the Court of Final Appeal arches. Each panel keeps the UV of
+// the solid course above it, on that course's own material. Columns, window
+// faces, the dome and the roof are already triangles and are not replaced.
+export function sealLandsdShellOpenings(geos) {
+  const list = (Array.isArray(geos) ? geos : [geos]).filter((geo) => geo?.getAttribute?.('position'));
+  if (!list.length) return 0;
+  const tris = [];
+  list.forEach((geo, part) => {
+    tris.push(...shellTriangles(geo, part));
+  });
+  const quads = landsdShellOpeningQuads(tris);
+  if (!quads.length) return 0;
+  const groups = list.map(() => []);
+  for (const quad of quads) {
+    const part = Number.isInteger(quad.part) ? quad.part : 0;
+    if (groups[part]) groups[part].push(quad);
+  }
+  groups.forEach((group, part) => appendShellQuads(list[part], group));
+  return quads.length;
 }
 
 // Street-level up-faces leave the photograph. The deck material is continuous
@@ -1068,6 +1185,40 @@ async function mountOneHkGltf(entry, group, colliders) {
   };
   const paveStreet = boxClosestDistance(entry, HK_STREET_EYE) <= HK_STREET_NEAR;
   let streetDeck = 0;
+  const shellQueue = [];
+  const placePrepared = (geo, material, dropped) => {
+    const sampler = farSampler;
+    const placeMesh = (partGeo, partMaterial) => {
+      const mesh = new THREE.Mesh(partGeo, partMaterial);
+      mesh.name = 'HkGltfBuilding';
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.userData.hkBuildingId = buildingIdOf(entry);
+      mesh.userData.hkFile = entry.file || '';
+      mesh.userData.hkSheet = entry.sheet || '';
+      mesh.userData.hkSource = 'landsd';
+      mesh.userData.hkNullDropped = dropped;
+      group.add(mesh);
+      meshes++;
+    };
+    const pieces = splitLandsdOnEyeCharts(geo, material, sampler);
+    if (!pieces) {
+      packLandsdChart(geo, material, sampler);
+      sharpenPhoto(material, sampler);
+      noteFarGrain(material);
+      placeMesh(geo, material);
+      return;
+    }
+    geo.dispose();
+    const bins = pieces.filter((piece) => piece.atlas).length;
+    console.info(`[gltf] on-eye atlas ${material?.name || ''} bins ${bins}`);
+    for (const piece of pieces) {
+      if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
+      sharpenPhoto(piece.material, sampler);
+      noteFarGrain(piece.material);
+      placeMesh(piece.geo, piece.material);
+    }
+  };
   gltf.scene.traverse((obj) => {
     if (!obj.isMesh) return;
     const geo = bakeMesh(obj);
@@ -1101,44 +1252,27 @@ async function mountOneHkGltf(entry, group, colliders) {
       dropped = omitLandsdNullFill(geo, obj.material);
     }
     nullDropped += dropped;
+    if (buildingIdOf(entry) === HK_SHELL_SOLID_ID) {
+      shellQueue.push({ geo, material: obj.material, dropped });
+      return;
+    }
     if (geo.drawRange.count === 0) {
       geo.dispose();
       return;
     }
-    const sampler = farSampler;
-    const placeMesh = (partGeo, material) => {
-      const mesh = new THREE.Mesh(partGeo, material);
-      mesh.name = 'HkGltfBuilding';
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData.hkBuildingId = buildingIdOf(entry);
-      mesh.userData.hkFile = entry.file || '';
-      mesh.userData.hkSheet = entry.sheet || '';
-      mesh.userData.hkSource = 'landsd';
-      mesh.userData.hkNullDropped = dropped;
-      group.add(mesh);
-      meshes++;
-    };
-    const pieces = splitLandsdOnEyeCharts(geo, obj.material, sampler);
-    if (!pieces) {
-      packLandsdChart(geo, obj.material, sampler);
-      sharpenPhoto(obj.material, sampler);
-      noteFarGrain(obj.material);
-      placeMesh(geo, obj.material);
-    } else {
-      // Atlas UVs already sit inside the replicated pad. A second crop
-      // would cut that pad off. Rest triangles still use the file.
-      geo.dispose();
-      const bins = pieces.filter((piece) => piece.atlas).length;
-      console.info(`[gltf] on-eye atlas ${obj.material?.name || ''} bins ${bins}`);
-      for (const piece of pieces) {
-        if (!piece.atlas) packLandsdChart(piece.geo, piece.material, sampler);
-        sharpenPhoto(piece.material, sampler);
-        noteFarGrain(piece.material);
-        placeMesh(piece.geo, piece.material);
-      }
-    }
+    placePrepared(geo, obj.material, dropped);
   });
+  if (shellQueue.length) {
+    const sealed = sealLandsdShellOpenings(shellQueue.map((part) => part.geo));
+    if (sealed) console.info(`[gltf] shell openings ${entry.file || entry.url} ${sealed}`);
+    for (const part of shellQueue) {
+      if (part.geo.drawRange.count === 0) {
+        part.geo.dispose();
+        continue;
+      }
+      placePrepared(part.geo, part.material, part.dropped);
+    }
+  }
   if (Number.isFinite(farGrainLod)) {
     console.info(`[gltf] far-grain mip ${entry.file || entry.url} maxLod ${farGrainLod}`);
   }
